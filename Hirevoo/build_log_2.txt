@@ -1,0 +1,23 @@
+
+> 01-email@0.1.0 build
+> next build
+
+Γû▓ Next.js 16.1.1 (Turbopack)
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 11.4s
+  Running TypeScript ...
+Failed to compile.
+
+./components/campaigns/compose-ui/compose-review-page.tsx:247:17
+Type error: Type '{ selectedContact: Contact; subject: string; setSubject: Dispatch<SetStateAction<string>>; emailBody: string; setEmailBody: Dispatch<SetStateAction<string>>; ... 12 more ...; campaignId: string; }' is not assignable to type 'IntrinsicAttributes & EmailEditorProps'.
+  Property 'campaignId' does not exist on type 'IntrinsicAttributes & EmailEditorProps'.
+
+  245 |                 currentIndex={selectedContactIndex}
+  246 |                 totalContacts={filteredContacts.length}
+> 247 |                 campaignId={campaignId}
+      |                 ^
+  248 |             />
+  249 |
+  250 |             <BrowseTemplatesModal
+Next.js build worker exited with code: 1 and signal: null

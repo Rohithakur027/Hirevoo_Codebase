@@ -1,0 +1,23 @@
+
+> 01-email@0.1.0 build
+> next build
+
+Γû▓ Next.js 16.1.1 (Turbopack)
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 8.8s
+  Running TypeScript ...
+Failed to compile.
+
+./app/campaigns/new/page.tsx:42:25
+Type error: Type '{ campaignName: string; onCampaignNameChange: (name: string) => void; }' is not assignable to type 'IntrinsicAttributes'.
+  Property 'campaignName' does not exist on type 'IntrinsicAttributes'.
+
+  40 |       >
+  41 |         {/* Upload Contacts Component */}
+> 42 |         <UploadContacts campaignName={campaignName} onCampaignNameChange={handleCampaignNameChange} />
+     |                         ^
+  43 |       </motion.div>
+  44 |     </DashboardLayout>
+  45 |   );
+Next.js build worker exited with code: 1 and signal: null

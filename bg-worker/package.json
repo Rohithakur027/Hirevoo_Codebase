@@ -1,0 +1,39 @@
+{
+  "name": "hirevoo-bg-worker",
+  "version": "1.0.0",
+  "description": "Production-grade background worker system for Hirevoo email campaigns",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "worker": "tsx watch workers/index.ts",
+    "worker:prod": "tsx workers/index.ts",
+    "worker:debug": "DEBUG=bullmq:* tsx watch workers/index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "bullmq": "^5.1.0",
+    "googleapis": "^129.0.0",
+    "ioredis": "^5.3.2",
+    "next": "^14.0.4",
+    "next-auth": "^4.24.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "eslint": "^8.55.0",
+    "eslint-config-next": "^14.0.4",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
