@@ -4,6 +4,7 @@
   "description": "Production-grade background worker system for Hirevoo email campaigns",
   "private": true,
   "scripts": {
+    
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

@@ -1,6 +1,7 @@
 "use client"
 
-import { useSession } from "../hooks/use-session"
+import { useSession } from "next-auth/react"
+import { useEffect, useState } from "react"
 import { SidebarProvider } from "@/context/SidebarContext"
 
 import { SideBar } from "@/components/layout"
@@ -26,6 +27,8 @@ import {
     User,
     Settings,
     LogOut,
+    CheckCircle,
+    X,
 } from "lucide-react"
 
 // Mock data - replace with actual data source
@@ -45,11 +48,25 @@ const chartData = [
     { day: "Sat", value: 40 },
 ]
 
-// Mock Gmail connection status - replace with actual auth logic
-const isGmailConnected = false
-
 export default function Dashboard() {
-    const { user, isLoading } = useSession()
+    const { data: session, status } = useSession()
+    const isLoading = status === "loading"
+    const user = session?.user
+    const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+    // Check URL params for success messages
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search)
+        const success = params.get('success')
+
+        if (success === 'gmail_connected') {
+            setSuccessMessage('Gmail connected successfully! You can now send email campaigns.')
+            // Clear success message after 5 seconds
+            setTimeout(() => setSuccessMessage(null), 5000)
+            // Clean URL params
+            window.history.replaceState({}, '', '/dashboard')
+        }
+    }, [])
 
     const userInitials = user?.name
         ? user.name.split(" ").map((n) => n[0]).join("").toUpperCase()
@@ -63,6 +80,22 @@ export default function Dashboard() {
 
             {/* Main Content Area - Two Column Layout */}
             <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Success Message Banner */}
+                {successMessage && (
+                    <div className="px-6 py-3 bg-green-50 border-b border-green-200 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                            <span className="text-green-800">{successMessage}</span>
+                        </div>
+                        <button
+                            onClick={() => setSuccessMessage(null)}
+                            className="text-green-600 hover:text-green-800"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+
                 {/* Header - Slimmer */}
                 <header className="flex items-center justify-between px-6 py-2 bg-white border-b border-gray-100 flex-shrink-0">
                     <div>
@@ -81,7 +114,7 @@ export default function Dashboard() {
                                             )}
                                         </div>
                                         <Avatar className="w-8 h-8">
-                                            <AvatarImage src={user?.avatar || "/placeholder.svg"} />
+                                            <AvatarImage src={user?.image || "/placeholder.svg"} />
                                             <AvatarFallback>{userInitials}</AvatarFallback>
                                         </Avatar>
                                     </button>

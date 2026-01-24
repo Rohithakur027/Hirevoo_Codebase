@@ -29,6 +29,7 @@ export interface UserProfile {
   
   // Gmail
   gmailConnected: boolean;
+  gmailPermissionLevel?: 'SEND_ONLY' | 'FULL_ACCESS';
   connectedEmail?: string;
   
   createdAt: string;

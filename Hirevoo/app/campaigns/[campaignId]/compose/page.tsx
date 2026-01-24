@@ -1,6 +1,6 @@
 'use client';
 
-import { SideBar } from '@/components/layout/SideBar';
+import { SideBar } from '@/components/layout';
 import { SidebarProvider } from '@/context/SidebarContext';
 import { ComposeReviewPage } from '@/components/campaigns/compose-ui';
 

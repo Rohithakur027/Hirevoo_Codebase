@@ -23,7 +23,7 @@ export interface Recipient {
 
 export default function UploadContacts() {
   const router = useRouter()
-  const { createCampaign, updateCampaignName } = useCampaign()
+  const { createCampaign, updateCampaignName, isLoading: isSaving, error: saveError } = useCampaign()
 
   const [campaignName, setCampaignName] = useState("")
   const [recipients, setRecipients] = useState<Recipient[]>([])
@@ -33,6 +33,7 @@ export default function UploadContacts() {
   const [googleSheetUrl, setGoogleSheetUrl] = useState("")
   const [isUploading, setIsUploading] = useState(false)
   const [importHint, setImportHint] = useState("")
+  const [isCreating, setIsCreating] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Email validation
@@ -445,28 +446,37 @@ export default function UploadContacts() {
               <span className="text-3xl font-bold text-gray-800">{validCount}</span>
               <Button
                 className="bg-[#7c3aed] text-white px-6 h-11 text-sm font-medium hover:bg-[#6d28d9] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                disabled={validCount === 0}
-                onClick={() => {
-                  // Convert recipients to CampaignContact format
-                  const contacts = recipients
-                    .filter(r => r.isValid)
-                    .map(r => ({
-                      id: r.id,
-                      name: r.name || '',
-                      email: r.email,
-                      company: r.company || undefined,
-                      role: r.role || undefined,
-                      emailStatus: 'draft' as const
-                    }))
+                disabled={validCount === 0 || isCreating || isSaving}
+                onClick={async () => {
+                  setIsCreating(true)
+                  try {
+                    // Convert recipients to CampaignContact format
+                    const contacts = recipients
+                      .filter(r => r.isValid)
+                      .map(r => ({
+                        id: r.id,
+                        name: r.name || '',
+                        email: r.email,
+                        company: r.company || undefined,
+                        role: r.role || undefined,
+                        emailStatus: 'draft' as const
+                      }))
 
-                  // Create campaign with contacts
-                  const campaign = createCampaign(campaignName || 'New Campaign', contacts)
+                    // Create campaign with contacts (this automatically saves to database)
+                    const campaign = createCampaign(campaignName || 'New Campaign', contacts)
 
-                  // Navigate to compose page
-                  router.push(`/campaigns/${campaign.id}/compose`)
+                    // Navigate to compose page with the temporary ID
+                    // The ID will be updated to the real database ID once save completes
+                    router.push(`/campaigns/${campaign.id}/compose`)
+                  } catch (error) {
+                    console.error('Failed to create campaign:', error)
+                    alert('Failed to create campaign. Please try again.')
+                  } finally {
+                    setIsCreating(false)
+                  }
                 }}
               >
-                Next Step: Compose Emails
+                {isCreating || isSaving ? 'Creating...' : 'Next Step: Compose Emails'}
               </Button>
             </div>
           </div>

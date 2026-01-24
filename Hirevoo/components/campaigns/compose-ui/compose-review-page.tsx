@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { ContactSidebar } from "./contact-sidebar"
 import { EmailEditor } from "./email-editor"
@@ -88,11 +88,17 @@ export function ComposeReviewPage() {
         campaign,
         updateContactEmail,
         markContactDone,
+        saveContactsToDatabase,
+        isLoading: isSaving,
+        error: saveError,
         currentContactId,
         setCurrentContactId,
         completedCount,
         totalCount
     } = useCampaign()
+
+    // Track avatar colors consistently
+    const avatarColorsRef = useRef<Map<string, string>>(new Map())
 
     // ALL HOOKS MUST BE CALLED AT THE TOP LEVEL, BEFORE ANY CONDITIONAL LOGIC
     const [isLoading, setIsLoading] = useState(true)
@@ -131,15 +137,22 @@ export function ComposeReviewPage() {
     }
 
     // Convert campaign contacts to the Contact format used by the UI
-    const contacts: Contact[] = campaign.contacts.map(c => ({
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        avatar: c.name.split(' ').map(n => n[0]).join('').toUpperCase(),
-        avatarColor: `bg-${['indigo', 'rose', 'amber', 'teal', 'slate', 'emerald'][Math.floor(Math.random() * 6)]}-500`,
-        status: c.emailStatus === 'done' ? 'ready' as const :
-               c.emailStatus === 'draft' ? 'draft' as const : 'pending' as const
-    }))
+    const avatarColors = ['indigo', 'rose', 'amber', 'teal', 'slate', 'emerald']
+    const contacts: Contact[] = campaign.contacts.map((c, index) => {
+        // Get or create consistent avatar color for this contact
+        if (!avatarColorsRef.current.has(c.id)) {
+            avatarColorsRef.current.set(c.id, `bg-${avatarColors[index % avatarColors.length]}-500`)
+        }
+        return {
+            id: c.id,
+            name: c.name,
+            email: c.email,
+            avatar: c.name.split(' ').map(n => n[0]).join('').toUpperCase(),
+            avatarColor: avatarColorsRef.current.get(c.id)!,
+            status: c.emailStatus === 'done' ? 'ready' as const :
+                   c.emailStatus === 'draft' ? 'draft' as const : 'pending' as const
+        }
+    })
 
     // Don't use local state for contacts - use campaign context
     const setContacts = () => {} // Not needed since we use campaign context
@@ -177,7 +190,7 @@ export function ComposeReviewPage() {
         }
     }
 
-    const handleDoneAndNext = () => {
+    const handleDoneAndNext = async () => {
         if (!selectedContact) {
             toast.error("No contact selected")
             return
@@ -191,13 +204,29 @@ export function ComposeReviewPage() {
 
         if (completedCount + 1 >= totalCount) {
             toast.success("Campaign Submitted!", {
-                description: "Redirecting to send page...",
+                description: "Saving to database and redirecting...",
             })
-            // Navigate to the send page
-            setTimeout(() => {
-                router.push(`/campaigns/${campaignId}/send`)
-            }, 500)
+
+            // Save all contacts to database before navigating to send page
+            // Small delay to ensure state is updated
+            setTimeout(async () => {
+                const saved = await saveContactsToDatabase()
+                if (saved) {
+                    // Use the actual campaign ID (which may have been updated from temp ID)
+                    const actualCampaignId = campaign?.id || campaignId
+                    router.push(`/campaigns/${actualCampaignId}/send`)
+                } else {
+                    toast.error("Failed to save campaign", {
+                        description: "Please try again or check your connection.",
+                    })
+                }
+            }, 100)
         } else {
+            // Move to next contact
+            const nextIndex = selectedContactIndex + 1
+            if (nextIndex < filteredContacts.length) {
+                setCurrentContactId(filteredContacts[nextIndex].id)
+            }
             // Reset for next contact
             setEmailBody("Hi {FirstName},\n\nI hope this email finds you well...")
             setSubject("")

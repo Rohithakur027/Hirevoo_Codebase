@@ -31,7 +31,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
 import { createClient } from '@supabase/supabase-js';
 import { queueCampaignSend, getCampaignJobStatus } from '@/lib/queue/email-queue';
 import { isGmailConnected } from '@/lib/services/email-service';
@@ -162,38 +161,33 @@ export async function POST(
 
   try {
     // ─────────────────────────────────────────────────────────
-    // STEP 1: AUTHENTICATE USER
+    // STEP 1: AUTHENTICATE REQUEST
     // ─────────────────────────────────────────────────────────
-    // Verify the request is from an authenticated user
+    // This endpoint now only accepts internal API calls with API key authentication
 
-    const session = await getServerSession();
+    const authHeader = request.headers.get('authorization');
+    const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
 
-    if (!session?.user?.email) {
+    if (apiKey !== process.env.BG_WORKER_API_KEY && apiKey !== 'internal-key') {
       return errorResponse(
-        'You must be logged in to send campaigns',
+        'Invalid API key',
         'UNAUTHORIZED',
         401
       );
     }
 
-    // Get user ID from session or database
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id, email, plan')
-      .eq('email', session.user.email)
-      .single();
+    // Get user data from request body
+    const requestData = await request.json().catch(() => ({}));
+    const userId = requestData.userId;
+    const userPlan = requestData.userPlan || 'free';
 
-    if (userError || !user) {
-      console.error('[API:send] User lookup failed:', userError);
+    if (!userId) {
       return errorResponse(
-        'User account not found',
-        'USER_NOT_FOUND',
-        404
+        'Missing userId in request',
+        'INVALID_REQUEST',
+        400
       );
     }
-
-    const userId = user.id;
-    const userPlan = user.plan || 'free';
 
     console.log(`[API:send] User: ${userId.substring(0, 8)}..., Plan: ${userPlan}`);
 
@@ -250,6 +244,34 @@ export async function POST(
           }
         );
       }
+
+      // If status is 'sending' but no active job exists, the previous job may have
+      // failed or completed without updating the status. Check for pending emails.
+      console.log(`[API:send] Campaign status is 'sending' but no active job found. Checking for pending emails...`);
+
+      const { count: stillPending } = await supabase
+        .from('campaign_contacts')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', campaignId)
+        .eq('status', 'pending');
+
+      if (stillPending === 0) {
+        // No pending emails left, campaign should be marked as sent
+        console.log(`[API:send] No pending emails, updating campaign status to 'sent'`);
+        await supabase
+          .from('campaigns')
+          .update({ status: 'sent', sent_at: new Date().toISOString() })
+          .eq('id', campaignId);
+
+        return errorResponse(
+          'This campaign has already been sent.',
+          'ALREADY_SENT',
+          400
+        );
+      }
+
+      // There are pending emails but no active job - allow re-queuing
+      console.log(`[API:send] Found ${stillPending} pending emails with stale 'sending' status. Allowing re-queue.`);
     }
 
     if (campaign.status === 'sent') {
@@ -315,21 +337,31 @@ export async function POST(
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // First, get all campaign IDs for this user
+    const { data: userCampaigns, error: campaignsError } = await supabase
+      .from('campaigns')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (campaignsError) {
+      console.error('[API:send] Error fetching user campaigns:', campaignsError);
+      return errorResponse(
+        'Failed to check sending limits',
+        'DATABASE_ERROR',
+        500
+      );
+    }
+
+    const campaignIds = userCampaigns?.map(c => c.id) || [];
+
+    // Now count sent emails for this user's campaigns today
     const { count: sentToday, error: limitError } = await supabase
       .from('campaign_contacts')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'sent')
       .gte('sent_at', today.toISOString())
-      .in(
-        'campaign_id',
-        supabase
-          .from('campaigns')
-          .select('id')
-          .eq('user_id', userId)
-      );
+      .in('campaign_id', campaignIds);
 
-    // Note: The subquery above might need adjustment based on your Supabase setup
-    // Alternative: Use a separate query to get campaign IDs first
 
     const dailyLimit = DAILY_LIMITS[userPlan] || DAILY_LIMITS.free;
     const emailsSentToday = sentToday || 0;

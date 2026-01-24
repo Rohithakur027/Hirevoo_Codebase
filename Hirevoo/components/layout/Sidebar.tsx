@@ -10,13 +10,16 @@ import {
     ChevronLeft,
     ChevronRight,
     LogOut,
-    Plus,
+    CheckCircle,
 } from "lucide-react"
 import Link from "next/link"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { usePathname } from "next/navigation"
 import { useSidebar } from "@/context/SidebarContext"
 import { useSession } from "@/app/hooks/use-session"
+import { useState, useEffect } from "react"
+import ConnectGmailModal, { PermissionLevel } from "@/components/dashboard/ConnectGmailModal"
+import { signOut } from "next-auth/react"
 
 const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
@@ -26,13 +29,151 @@ const navItems = [
     { icon: UserIcon, label: "Profile", href: "/profile" },
 ]
 
+interface GmailStatusData {
+    isConnected: boolean;
+    permissionLevel: 'SEND_ONLY' | 'FULL_ACCESS' | null;
+    email: string | null;
+}
+
 export function SideBar() {
     const pathname = usePathname()
     const { collapsed, toggleCollapsed } = useSidebar()
     const { user, isLoading } = useSession()
+    const [isDisconnecting, setIsDisconnecting] = useState(false)
+    const [isConnecting, setIsConnecting] = useState(false)
+    const [gmailStatus, setGmailStatus] = useState<GmailStatusData>({
+        isConnected: false,
+        permissionLevel: null,
+        email: null,
+    })
+    const [showConnectModal, setShowConnectModal] = useState(false)
     const userInitials = user?.name
         ? user.name.split(" ").map((n: string) => n[0]).join("").toUpperCase()
         : "?"
+
+    // Check Gmail connection status
+    const checkGmailStatus = async () => {
+        try {
+            const response = await fetch('/api/auth/gmail/status')
+            if (response.ok) {
+                const data = await response.json()
+                setGmailStatus({
+                    isConnected: data.isConnected || false,
+                    permissionLevel: data.permissionLevel || null,
+                    email: data.email || null,
+                })
+            }
+        } catch (error) {
+            console.error('Error checking Gmail status:', error)
+        }
+    }
+
+    // Handle Gmail connect/disconnect
+    const handleGmailAction = async () => {
+        if (gmailStatus.isConnected) {
+            // Disconnect Gmail
+            if (isDisconnecting) return
+
+            try {
+                setIsDisconnecting(true)
+                const response = await fetch('/api/auth/gmail/disconnect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                })
+
+                if (response.ok) {
+                    setGmailStatus({
+                        isConnected: false,
+                        permissionLevel: null,
+                        email: null,
+                    })
+                } else {
+                    const errorData = await response.json().catch(() => ({}))
+                    console.error('Failed to disconnect Gmail:', errorData)
+                    alert(`Failed to disconnect Gmail: ${errorData.error || 'Please try again.'}`)
+                }
+            } catch (error) {
+                console.error('Error disconnecting Gmail:', error)
+                alert('Error disconnecting Gmail. Please try again.')
+            } finally {
+                setIsDisconnecting(false)
+            }
+        } else {
+            // Connect Gmail - open modal for permission selection
+            setShowConnectModal(true)
+        }
+    }
+
+    // Handle Gmail connection from modal
+    const handleConnectGmail = async (permissionLevel: PermissionLevel) => {
+        try {
+            setIsConnecting(true)
+            const response = await fetch('/api/auth/gmail/connect', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    permissionLevel
+                }),
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                // Close modal and redirect to Google OAuth
+                setShowConnectModal(false)
+                window.location.href = data.url
+            } else {
+                console.error('Failed to get Gmail connect URL')
+                alert('Failed to connect Gmail. Please try again.')
+            }
+        } catch (error) {
+            console.error('Error connecting Gmail:', error)
+            alert('Error connecting Gmail. Please try again.')
+        } finally {
+            setIsConnecting(false)
+        }
+    }
+
+    // Handle logout
+    const handleLogout = async () => {
+        await signOut({ callbackUrl: '/login' })
+    }
+
+    // Check Gmail status on component mount and periodically
+    useEffect(() => {
+        checkGmailStatus()
+
+        // Check Gmail status every 30 seconds
+        const interval = setInterval(checkGmailStatus, 30000)
+
+        // Also check when the page becomes visible (user switches tabs)
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                checkGmailStatus()
+            }
+        }
+
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+
+        return () => {
+            clearInterval(interval)
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
+        }
+    }, [])
+
+    // Truncate email for display
+    const truncateEmail = (email: string | null, maxLength: number = 20) => {
+        if (!email) return null
+        if (email.length <= maxLength) return email
+        const [localPart, domain] = email.split('@')
+        if (localPart.length > maxLength - 5) {
+            return `${localPart.substring(0, maxLength - 8)}...@${domain}`
+        }
+        return email
+    }
 
     return (
         <aside
@@ -79,18 +220,53 @@ export function SideBar() {
                 </ul>
             </nav>
 
-            {/* Quick Actions */}
+            {/* Quick Actions - Gmail Connect/Disconnect */}
             <div className="px-3 py-2 flex-shrink-0">
-                <Link
-                    href="/campaigns/new"
+                <button
+                    onClick={handleGmailAction}
+                    disabled={isDisconnecting || isConnecting}
                     className={cn(
-                        "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors bg-emerald-500 hover:bg-emerald-600 text-white w-full justify-center",
-                        collapsed ? "px-2" : ""
+                        "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors w-full rounded-sm",
+                        gmailStatus.isConnected
+                            ? "bg-green-50 hover:bg-green-100 text-green-700 border border-green-200"
+                            : "bg-black hover:bg-gray-800 text-white",
+                        collapsed ? "justify-center px-2" : ""
                     )}
                 >
-                    <Plus className="w-4 h-4 flex-shrink-0" />
-                    {!collapsed && <span>New Campaign</span>}
-                </Link>
+                    {gmailStatus.isConnected ? (
+                        <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                    ) : (
+                        <Mail className="w-4 h-4 flex-shrink-0" />
+                    )}
+                    {!collapsed && (
+                        <span className="truncate">
+                            {isDisconnecting
+                                ? 'Disconnecting...'
+                                : isConnecting
+                                ? 'Connecting...'
+                                : gmailStatus.isConnected
+                                ? 'Gmail Connected'
+                                : 'Connect Gmail'
+                            }
+                        </span>
+                    )}
+                </button>
+
+                {/* Show connected email when expanded and connected */}
+                {!collapsed && gmailStatus.isConnected && gmailStatus.email && (
+                    <div className="mt-2 px-3">
+                        <p className="text-xs text-gray-500 truncate" title={gmailStatus.email}>
+                            {truncateEmail(gmailStatus.email)}
+                        </p>
+                        <button
+                            onClick={handleGmailAction}
+                            disabled={isDisconnecting}
+                            className="text-xs text-red-500 hover:text-red-700 mt-1"
+                        >
+                            {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* User Profile */}
@@ -113,14 +289,17 @@ export function SideBar() {
                             ) : (
                                 <>
                                     <p className="text-sm font-medium text-gray-800 truncate">{user?.name || "Guest"}</p>
-                                    <p className="text-xs text-gray-500 truncate">{user?.role || "No Role"}</p>
+                                    <p className="text-xs text-gray-500 truncate">{user?.email || "Not logged in"}</p>
                                 </>
                             )}
                         </div>
                     )}
                 </div>
                 {!collapsed && (
-                    <button className="flex items-center gap-2 mt-4 text-sm text-gray-500 hover:text-gray-700">
+                    <button
+                        onClick={handleLogout}
+                        className="flex items-center gap-2 mt-4 text-sm text-gray-500 hover:text-gray-700"
+                    >
                         <LogOut className="w-4 h-4" />
                         <span>Log Out</span>
                     </button>
@@ -138,6 +317,13 @@ export function SideBar() {
                     <ChevronLeft className="w-4 h-4 text-gray-600" />
                 )}
             </button>
+
+            {/* Connect Gmail Modal */}
+            <ConnectGmailModal
+                isOpen={showConnectModal}
+                onClose={() => setShowConnectModal(false)}
+                onConnect={handleConnectGmail}
+            />
         </aside>
     )
 }

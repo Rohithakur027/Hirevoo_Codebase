@@ -3,16 +3,52 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { gmailClient } from "@/lib/gmail/client";
 
+export async function POST(request: Request) {
+    try {
+        const session = await getServerSession(authOptions);
+        console.log('[Gmail Connect] Session:', session ? 'Found' : 'Not found');
+        console.log('[Gmail Connect] Session user:', session?.user ? 'Present' : 'Missing');
+        console.log('[Gmail Connect] Session user.id:', session?.user?.id);
+        console.log('[Gmail Connect] Session user.email:', session?.user?.email);
+
+        if (!session || !session.user || !session.user.email) {
+            console.log('[Gmail Connect] Authorization failed - no valid session');
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const body = await request.json();
+        const { permissionLevel } = body;
+
+        // Validate permission level
+        if (!permissionLevel || !['SEND_ONLY', 'FULL_ACCESS'].includes(permissionLevel)) {
+            return NextResponse.json(
+                { error: "Invalid permission level. Must be 'SEND_ONLY' or 'FULL_ACCESS'" },
+                { status: 400 }
+            );
+        }
+
+        const url = gmailClient.generateAuthUrl(session.user.email, permissionLevel);
+        return NextResponse.json({ url, permissionLevel });
+    } catch (error) {
+        console.error("Error generating Auth URL:", error);
+        return NextResponse.json(
+            { error: "Failed to generate connection URL" },
+            { status: 500 }
+        );
+    }
+}
+
+// Keep GET method for backward compatibility (default to FULL_ACCESS)
 export async function GET() {
     const session = await getServerSession(authOptions);
 
-    if (!session || !session.user || !session.user.id) {
+    if (!session || !session.user || !session.user.email) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     try {
-        const url = gmailClient.generateAuthUrl(session.user.id);
-        return NextResponse.json({ url });
+        const url = gmailClient.generateAuthUrl(session.user.email, 'FULL_ACCESS');
+        return NextResponse.json({ url, permissionLevel: 'FULL_ACCESS' });
     } catch (error) {
         console.error("Error generating Auth URL:", error);
         return NextResponse.json(

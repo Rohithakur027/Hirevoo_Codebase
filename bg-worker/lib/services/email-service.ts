@@ -17,6 +17,9 @@
  * @module lib/services/email-service
  */
 
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+
 import { google, gmail_v1 } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 
@@ -242,7 +245,14 @@ async function refreshAccessToken(
   oauth2Client.setCredentials({ refresh_token: refreshToken });
 
   try {
+    console.log(`[EmailService] Attempting to refresh token for user ${userId}`);
     const { credentials } = await oauth2Client.refreshAccessToken();
+    console.log(`[EmailService] Google refresh response:`, {
+      hasAccessToken: !!credentials.access_token,
+      hasRefreshToken: !!credentials.refresh_token,
+      expiryDate: credentials.expiry_date,
+      scope: credentials.scope
+    });
 
     if (!credentials.access_token) {
       throw new Error('No access token returned from refresh');
@@ -454,6 +464,7 @@ export async function sendEmail(
   }
 
   if (!tokens) {
+    console.error(`${logPrefix} No Gmail tokens found in database for user ${userId}`);
     return {
       success: false,
       errorCode: 'TOKEN_INVALID',
@@ -462,6 +473,8 @@ export async function sendEmail(
       isRetryable: false, // User action required
     };
   }
+
+  console.log(`${logPrefix} Tokens found, expires at: ${tokens.expiresAt.toISOString()}, expired: ${isTokenExpired(tokens.expiresAt)}`);
 
   // ─────────────────────────────────────────────────────────
   // STEP 3: REFRESH TOKEN IF EXPIRED
@@ -476,6 +489,19 @@ export async function sendEmail(
       accessToken = await refreshAccessToken(userId, tokens.refreshToken);
     } catch (error) {
       console.error(`${logPrefix} Token refresh failed:`, error);
+      console.error(`${logPrefix} Error details:`, {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+
+      // Check if it's a specific Google API error
+      if (error.message?.includes('invalid_grant') ||
+          error.message?.includes('refresh token') ||
+          error.message?.includes('expired')) {
+        console.error(`${logPrefix} Refresh token appears to be invalid/expired`);
+      }
+
       return {
         success: false,
         errorCode: 'TOKEN_INVALID',
@@ -504,11 +530,13 @@ export async function sendEmail(
 
   let senderEmail: string;
   try {
+    console.log(`${logPrefix} Fetching Gmail profile to get sender address...`);
     const profile = await gmail.users.getProfile({ userId: 'me' });
     senderEmail = profile.data.emailAddress!;
     console.log(`${logPrefix} Sending from: ${senderEmail}`);
   } catch (error) {
     console.error(`${logPrefix} Failed to get sender profile:`, error);
+    console.error(`${logPrefix} This usually means the access token is invalid or Gmail API access was revoked`);
     return handleGmailError(error, logPrefix);
   }
 

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { SideBar } from '@/components/layout/SideBar';
+import { SideBar } from '@/components/layout';
 import { SidebarProvider } from '@/context/SidebarContext';
 import { useSession } from '@/app/hooks/use-session';
 import { Button } from '@/components/ui/button';
@@ -414,6 +414,7 @@ export default function ProfilePage() {
         </Card>
       </motion.div>
       </main>
+        </div>
     </div>
   </SidebarProvider>
   );

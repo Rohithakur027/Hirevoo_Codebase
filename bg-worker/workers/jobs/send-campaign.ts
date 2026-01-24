@@ -45,11 +45,13 @@ interface PendingEmail {
   id: string;
   campaign_id: string;
   contact_id: string;
-  recipient_email: string;
-  recipient_name: string | null;
   email_subject: string;
   email_body: string;
   status: string;
+  contacts: {
+    email: string;
+    name: string | null;
+  };
 }
 
 /**
@@ -121,6 +123,22 @@ const supabase = createClient(
 const publisherRedis = createRedisConnection('worker-publisher');
 
 // ============================================================
+// REDIS COMMAND OPTIMIZATION SETTINGS
+// ============================================================
+
+/**
+ * Batch size for progress updates to reduce Redis commands.
+ * Instead of updating progress after every email, we batch updates.
+ */
+const PROGRESS_UPDATE_INTERVAL = 10; // Update progress every N emails
+
+/**
+ * Batch size for Pub/Sub events to reduce Redis commands.
+ * Instead of publishing after every email, we batch publish.
+ */
+const PUBSUB_BATCH_INTERVAL = 5; // Publish event every N emails
+
+// ============================================================
 // MAIN PROCESSING FUNCTION
 // ============================================================
 
@@ -174,18 +192,40 @@ export async function processCampaign(
     // This makes the job idempotent - safe to retry without duplicates.
 
     console.log(`${logPrefix} Fetching pending emails from database...`);
+    console.log(`${logPrefix} Query: campaign_id=${campaignId}, status=pending`);
 
+    const fetchStartTime = Date.now();
     const { data: pendingEmails, error: fetchError } = await supabase
       .from('campaign_contacts')
-      .select('id, campaign_id, contact_id, recipient_email, recipient_name, email_subject, email_body, status')
+      .select(`
+        id,
+        campaign_id,
+        contact_id,
+        email_subject,
+        email_body,
+        status,
+        contacts!inner(email, name)
+      `)
       .eq('campaign_id', campaignId)
       .eq('status', 'pending')
       .order('created_at', { ascending: true });
 
+    const fetchDuration = Date.now() - fetchStartTime;
+    console.log(`${logPrefix} Database query completed in ${fetchDuration}ms`);
+
     if (fetchError) {
-      console.error(`${logPrefix} ❌ Failed to fetch emails:`, fetchError);
+      console.error(`${logPrefix} ❌ Failed to fetch emails:`, {
+        error: fetchError,
+        code: fetchError.code,
+        details: fetchError.details,
+        hint: fetchError.hint,
+        campaignId,
+        queryTime: fetchDuration
+      });
       throw new Error(`Database error: ${fetchError.message}`);
     }
+
+    console.log(`${logPrefix} Query successful: found ${pendingEmails?.length || 0} emails`);
 
     const totalEmails = pendingEmails?.length || 0;
 
@@ -228,7 +268,7 @@ export async function processCampaign(
       const emailLogPrefix = `${logPrefix}[${emailIndex + 1}/${totalEmails}]`;
 
       console.log(
-        `${emailLogPrefix} Processing: ${email.recipient_email} ` +
+        `${emailLogPrefix} Processing: ${email.contacts.email} ` +
           `(ID: ${email.id.substring(0, 8)})`
       );
 
@@ -237,13 +277,22 @@ export async function processCampaign(
         // STEP 4a: SEND EMAIL VIA GMAIL API
         // ─────────────────────────────────────────────────────
 
+        console.log(`${emailLogPrefix} 📤 Starting email send attempt...`);
+        console.log(`${emailLogPrefix} Email details: to=${email.contacts.email}, subject="${email.email_subject.substring(0, 50)}..."`);
+        console.log(`${emailLogPrefix} Email body length: ${email.email_body.length} characters`);
+
+        const emailSendStartTime = Date.now();
         const sendResult = await sendEmail({
-          to: email.recipient_email,
-          toName: email.recipient_name || undefined,
+          to: email.contacts.email,
+          toName: email.contacts.name || undefined,
           subject: email.email_subject,
           body: email.email_body,
           userId,
         });
+
+        const emailSendDuration = Date.now() - emailSendStartTime;
+        console.log(`${emailLogPrefix} Email send API call completed in ${emailSendDuration}ms`);
+        console.log(`${emailLogPrefix} Send result: success=${sendResult.success}, messageId=${sendResult.messageId}, errorCode=${sendResult.errorCode}`);
 
         if (sendResult.success) {
           // ───────────────────────────────────────────────────
@@ -251,7 +300,7 @@ export async function processCampaign(
           // ───────────────────────────────────────────────────
 
           console.log(
-            `${emailLogPrefix} ✅ Sent to ${email.recipient_email} ` +
+            `${emailLogPrefix} ✅ Sent to ${email.contacts.email} ` +
               `(Message ID: ${sendResult.messageId})`
           );
 
@@ -267,37 +316,41 @@ export async function processCampaign(
           // Increment success counter
           sentCount++;
 
-          // Create activity record
-          await createActivity(
-            userId,
-            campaignId,
-            'email_sent',
-            `Email sent to ${email.recipient_email}`,
-            `Subject: ${email.email_subject.substring(0, 50)}...`,
-            emailLogPrefix
-          );
+          // NOTE: Activity creation removed to reduce database load
+          // Activities are now only created for campaign completion and failures
 
-          // Publish success event to Redis Pub/Sub
-          await publishEmailSentEvent({
-            userId,
-            campaignId,
-            emailId: email.id,
-            recipientEmail: email.recipient_email,
-            progress: Math.round(((emailIndex + 1) / totalEmails) * 100),
-            sent: sentCount,
-            failed: failedCount,
-            total: totalEmails,
-            timestamp: new Date().toISOString(),
-          });
+          // Publish success event to Redis Pub/Sub (batched to reduce Redis commands)
+          // Only publish every PUBSUB_BATCH_INTERVAL emails or on the last email
+          if ((emailIndex + 1) % PUBSUB_BATCH_INTERVAL === 0 || emailIndex === totalEmails - 1) {
+            await publishEmailSentEvent({
+              userId,
+              campaignId,
+              emailId: email.id,
+              recipientEmail: email.contacts.email,
+              progress: Math.round(((emailIndex + 1) / totalEmails) * 100),
+              sent: sentCount,
+              failed: failedCount,
+              total: totalEmails,
+              timestamp: new Date().toISOString(),
+            });
+          }
         } else {
           // ───────────────────────────────────────────────────
           // STEP 4c: EMAIL SEND FAILED
           // ───────────────────────────────────────────────────
 
           console.error(
-            `${emailLogPrefix} ❌ Failed to send to ${email.recipient_email}: ` +
+            `${emailLogPrefix} ❌ Failed to send to ${email.contacts.email}: ` +
               `${sendResult.errorCode} - ${sendResult.errorMessage}`
           );
+          console.error(`${emailLogPrefix} Error details:`, {
+            errorCode: sendResult.errorCode,
+            errorMessage: sendResult.errorMessage,
+            emailId: email.id,
+            recipientEmail: email.contacts.email,
+            campaignId: email.campaign_id,
+            userId
+          });
 
           // Update database: mark as failed
           await updateEmailStatus(
@@ -311,22 +364,15 @@ export async function processCampaign(
           // Increment failure counter
           failedCount++;
 
-          // Create failure activity
-          await createActivity(
-            userId,
-            campaignId,
-            'email_failed',
-            `Failed to send to ${email.recipient_email}`,
-            sendResult.errorMessage,
-            emailLogPrefix
-          );
+          // NOTE: Individual failure activities removed to reduce database load
+          // Failures are tracked in campaign_contacts table and summarized at completion
 
-          // Publish failure event to Redis Pub/Sub
+          // Publish failure event to Redis Pub/Sub (always publish failures for visibility)
           await publishEmailFailedEvent({
             userId,
             campaignId,
             emailId: email.id,
-            recipientEmail: email.recipient_email,
+            recipientEmail: email.contacts.email,
             error: sendResult.errorMessage,
             errorCode: sendResult.errorCode,
             timestamp: new Date().toISOString(),
@@ -350,8 +396,16 @@ export async function processCampaign(
 
         console.error(
           `${emailLogPrefix} ⚠️ Unexpected error sending to ` +
-            `${email.recipient_email}:`,
-          unexpectedError
+            `${email.contacts.email}:`,
+          {
+            error: unexpectedError,
+            stack: unexpectedError instanceof Error ? unexpectedError.stack : undefined,
+            emailId: email.id,
+            recipientEmail: email.contacts.email,
+            campaignId: email.campaign_id,
+            userId,
+            errorType: unexpectedError instanceof Error ? unexpectedError.constructor.name : typeof unexpectedError
+          }
         );
 
         // Update database: mark as failed
@@ -369,20 +423,33 @@ export async function processCampaign(
       }
 
       // ─────────────────────────────────────────────────────────
-      // STEP 4e: UPDATE JOB PROGRESS
+      // STEP 4e: UPDATE JOB PROGRESS (BATCHED)
       // ─────────────────────────────────────────────────────────
       // BullMQ tracks job progress, which can be retrieved via the
       // queue API for showing in dashboards.
+      //
+      // OPTIMIZATION: Only update progress every PROGRESS_UPDATE_INTERVAL
+      // emails to reduce Redis commands. For 500 emails, this reduces
+      // from 500 to ~50 Redis HSET commands.
 
       processedCount++;
       const progressPercentage = Math.round((processedCount / totalEmails) * 100);
 
-      await job.updateProgress({
-        percentage: progressPercentage,
-        sent: sentCount,
-        failed: failedCount,
-        total: totalEmails,
-      });
+      // Only update progress every N emails or on the last email
+      if (processedCount % PROGRESS_UPDATE_INTERVAL === 0 || processedCount === totalEmails) {
+        console.log(`${emailLogPrefix} 📊 Updating job progress: ${progressPercentage}% (${sentCount} sent, ${failedCount} failed, ${totalEmails} total)`);
+
+        const progressUpdateStartTime = Date.now();
+        await job.updateProgress({
+          percentage: progressPercentage,
+          sent: sentCount,
+          failed: failedCount,
+          total: totalEmails,
+        });
+        const progressUpdateDuration = Date.now() - progressUpdateStartTime;
+
+        console.log(`${emailLogPrefix} ✅ Job progress updated in ${progressUpdateDuration}ms`);
+      }
 
       // ─────────────────────────────────────────────────────────
       // STEP 4f: RATE LIMITING DELAY
@@ -393,7 +460,11 @@ export async function processCampaign(
       // Don't delay after the last email (unnecessary wait).
 
       if (emailIndex < totalEmails - 1) {
+        console.log(`${emailLogPrefix} ⏱️ Applying rate limiting delay (200ms) before next email`);
+        const delayStartTime = Date.now();
         await delay(200);
+        const actualDelay = Date.now() - delayStartTime;
+        console.log(`${emailLogPrefix} ✅ Rate limiting delay completed (actual: ${actualDelay}ms)`);
       }
     }
 
@@ -457,7 +528,19 @@ export async function processCampaign(
 
     console.error(
       `${logPrefix} 💥 Job failed with error: ${errorMessage}`,
-      error
+      {
+        error: error,
+        stack: error instanceof Error ? error.stack : undefined,
+        campaignId,
+        userId,
+        jobId: job.id,
+        attemptsMade: job.attemptsMade,
+        maxAttempts: job.opts.attempts || 3,
+        durationMs: Date.now() - startTime,
+        sentCount,
+        failedCount,
+        processedCount
+      }
     );
 
     // Update campaign status to indicate failure
@@ -485,6 +568,7 @@ async function updateCampaignStatus(
   logPrefix: string
 ): Promise<void> {
   console.log(`${logPrefix} Updating campaign status to: ${status}`);
+  console.log(`${logPrefix} Update data:`, { status, sent_at: status === 'sent' ? new Date().toISOString() : null });
 
   const updateData: Record<string, unknown> = { status };
 
@@ -493,17 +577,31 @@ async function updateCampaignStatus(
     updateData.sent_at = new Date().toISOString();
   }
 
+  const updateStartTime = Date.now();
   const { error } = await supabase
     .from('campaigns')
     .update(updateData)
     .eq('id', campaignId);
 
+  const updateDuration = Date.now() - updateStartTime;
+  console.log(`${logPrefix} Campaign status update completed in ${updateDuration}ms`);
+
   if (error) {
     console.error(
       `${logPrefix} ⚠️ Failed to update campaign status:`,
-      error
+      {
+        error: error,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        campaignId,
+        status,
+        updateTime: updateDuration
+      }
     );
     // Don't throw - status update failure shouldn't stop processing
+  } else {
+    console.log(`${logPrefix} ✅ Campaign status updated successfully`);
   }
 }
 
@@ -531,17 +629,38 @@ async function updateEmailStatus(
     // gmail_message_id: gmailMessageId,
   };
 
+  console.log(`${logPrefix} Updating email status: emailId=${emailId}, status=${status}, gmailMessageId=${gmailMessageId}`);
+  if (errorMessage) {
+    console.log(`${logPrefix} Error message: ${errorMessage}`);
+  }
+
+  const updateStartTime = Date.now();
   const { error } = await supabase
     .from('campaign_contacts')
     .update(updateData)
     .eq('id', emailId);
 
+  const updateDuration = Date.now() - updateStartTime;
+  console.log(`${logPrefix} Email status update completed in ${updateDuration}ms`);
+
   if (error) {
     console.error(
       `${logPrefix} ⚠️ Failed to update email status for ${emailId}:`,
-      error
+      {
+        error: error,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        emailId,
+        status,
+        gmailMessageId,
+        errorMessage,
+        updateTime: updateDuration
+      }
     );
     // Don't throw - status update failure shouldn't stop processing
+  } else {
+    console.log(`${logPrefix} ✅ Email status updated successfully`);
   }
 }
 
@@ -568,21 +687,38 @@ async function createActivity(
   description: string,
   logPrefix: string
 ): Promise<void> {
-  const { error } = await supabase.from('activities').insert({
+  console.log(`${logPrefix} Creating activity: type=${type}, title="${title}"`);
+
+  const activityData = {
     user_id: userId,
     campaign_id: campaignId,
     type,
     title,
     description,
     created_at: new Date().toISOString(),
-  });
+  };
+
+  const insertStartTime = Date.now();
+  const { error } = await supabase.from('activities').insert(activityData);
+
+  const insertDuration = Date.now() - insertStartTime;
+  console.log(`${logPrefix} Activity insert completed in ${insertDuration}ms`);
 
   if (error) {
     // Log but don't fail - activities are nice-to-have, not critical
     console.warn(
       `${logPrefix} ⚠️ Failed to create activity:`,
-      error.message
+      {
+        error: error,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        activityData,
+        insertTime: insertDuration
+      }
     );
+  } else {
+    console.log(`${logPrefix} ✅ Activity created successfully`);
   }
 }
 
@@ -599,10 +735,30 @@ async function createActivity(
  * @param event - Event data to publish
  */
 async function publishEmailSentEvent(event: ProgressEvent): Promise<void> {
+  console.log(`[PubSub] Publishing email:sent event for ${event.recipientEmail} (progress: ${event.progress}%)`);
+  console.log(`[PubSub] Event data:`, {
+    userId: event.userId,
+    campaignId: event.campaignId.substring(0, 8),
+    emailId: event.emailId.substring(0, 8),
+    recipientEmail: event.recipientEmail,
+    progress: event.progress,
+    sent: event.sent,
+    failed: event.failed,
+    total: event.total
+  });
+
   try {
+    const publishStartTime = Date.now();
     await publisherRedis.publish('email:sent', JSON.stringify(event));
+    const publishDuration = Date.now() - publishStartTime;
+    console.log(`[PubSub] ✅ Published email:sent event in ${publishDuration}ms`);
   } catch (error) {
-    console.warn('[PubSub] Failed to publish email:sent event:', error);
+    console.error('[PubSub] ❌ Failed to publish email:sent event:', {
+      error: error,
+      stack: error instanceof Error ? error.stack : undefined,
+      event: event,
+      channel: 'email:sent'
+    });
     // Don't throw - pub/sub failure shouldn't stop email processing
   }
 }
@@ -613,10 +769,28 @@ async function publishEmailSentEvent(event: ProgressEvent): Promise<void> {
  * @param event - Event data to publish
  */
 async function publishEmailFailedEvent(event: EmailFailedEvent): Promise<void> {
+  console.log(`[PubSub] Publishing email:failed event for ${event.recipientEmail} (${event.errorCode})`);
+  console.log(`[PubSub] Error details:`, {
+    userId: event.userId,
+    campaignId: event.campaignId.substring(0, 8),
+    emailId: event.emailId.substring(0, 8),
+    recipientEmail: event.recipientEmail,
+    error: event.error,
+    errorCode: event.errorCode
+  });
+
   try {
+    const publishStartTime = Date.now();
     await publisherRedis.publish('email:failed', JSON.stringify(event));
+    const publishDuration = Date.now() - publishStartTime;
+    console.log(`[PubSub] ✅ Published email:failed event in ${publishDuration}ms`);
   } catch (error) {
-    console.warn('[PubSub] Failed to publish email:failed event:', error);
+    console.error('[PubSub] ❌ Failed to publish email:failed event:', {
+      error: error,
+      stack: error instanceof Error ? error.stack : undefined,
+      event: event,
+      channel: 'email:failed'
+    });
   }
 }
 
@@ -628,10 +802,28 @@ async function publishEmailFailedEvent(event: EmailFailedEvent): Promise<void> {
 async function publishCampaignCompleteEvent(
   event: CampaignCompleteEvent
 ): Promise<void> {
+  console.log(`[PubSub] Publishing campaign:complete event for campaign ${event.campaignId.substring(0, 8)}`);
+  console.log(`[PubSub] Campaign summary:`, {
+    userId: event.userId,
+    campaignId: event.campaignId.substring(0, 8),
+    totalSent: event.totalSent,
+    totalFailed: event.totalFailed,
+    duration: event.duration,
+    completionRate: event.totalSent + event.totalFailed > 0 ? ((event.totalSent / (event.totalSent + event.totalFailed)) * 100).toFixed(1) + '%' : '0%'
+  });
+
   try {
+    const publishStartTime = Date.now();
     await publisherRedis.publish('campaign:complete', JSON.stringify(event));
+    const publishDuration = Date.now() - publishStartTime;
+    console.log(`[PubSub] ✅ Published campaign:complete event in ${publishDuration}ms`);
   } catch (error) {
-    console.warn('[PubSub] Failed to publish campaign:complete event:', error);
+    console.error('[PubSub] ❌ Failed to publish campaign:complete event:', {
+      error: error,
+      stack: error instanceof Error ? error.stack : undefined,
+      event: event,
+      channel: 'campaign:complete'
+    });
   }
 }
 
@@ -673,11 +865,21 @@ export async function processCampaignInBatches(
   let hasMore = true;
 
   // Get total count first
-  const { count: totalEmails } = await supabase
+  console.log(`${logPrefix} Counting total pending emails for batch processing...`);
+  const countStartTime = Date.now();
+  const { count: totalEmails, error: countError } = await supabase
     .from('campaign_contacts')
     .select('*', { count: 'exact', head: true })
     .eq('campaign_id', campaignId)
     .eq('status', 'pending');
+
+  const countDuration = Date.now() - countStartTime;
+  console.log(`${logPrefix} Count query completed in ${countDuration}ms`);
+
+  if (countError) {
+    console.error(`${logPrefix} ❌ Failed to count emails:`, countError);
+    throw new Error(`Database error: ${countError.message}`);
+  }
 
   if (!totalEmails || totalEmails === 0) {
     console.log(`${logPrefix} No pending emails found`);
@@ -720,50 +922,97 @@ export async function processCampaignInBatches(
     for (const email of batch as PendingEmail[]) {
       const emailLogPrefix = `${logPrefix}[${processedCount + 1}/${totalEmails}]`;
 
+      console.log(`${emailLogPrefix} Processing email from batch: ${email.contacts.email}`);
+
       try {
+        console.log(`${emailLogPrefix} 📤 Starting email send attempt...`);
+        console.log(`${emailLogPrefix} Email details: to=${email.contacts.email}, subject="${email.email_subject.substring(0, 50)}..."`);
+        console.log(`${emailLogPrefix} Email body length: ${email.email_body.length} characters`);
+
+        const emailSendStartTime = Date.now();
         const sendResult = await sendEmail({
-          to: email.recipient_email,
-          toName: email.recipient_name || undefined,
+          to: email.contacts.email,
+          toName: email.contacts.name || undefined,
           subject: email.email_subject,
           body: email.email_body,
           userId,
         });
 
+        const emailSendDuration = Date.now() - emailSendStartTime;
+        console.log(`${emailLogPrefix} Email send API call completed in ${emailSendDuration}ms`);
+        console.log(`${emailLogPrefix} Send result: success=${sendResult.success}, messageId=${sendResult.messageId}, errorCode=${sendResult.errorCode}`);
+
         if (sendResult.success) {
           await updateEmailStatus(email.id, 'sent', sendResult.messageId, null, emailLogPrefix);
           sentCount++;
 
-          await publishEmailSentEvent({
-            userId,
-            campaignId,
-            emailId: email.id,
-            recipientEmail: email.recipient_email,
-            progress: Math.round(((processedCount + 1) / totalEmails) * 100),
-            sent: sentCount,
-            failed: failedCount,
-            total: totalEmails,
-            timestamp: new Date().toISOString(),
-          });
+          // Batch Pub/Sub events to reduce Redis commands
+          if ((processedCount + 1) % PUBSUB_BATCH_INTERVAL === 0 || processedCount + 1 === totalEmails) {
+            await publishEmailSentEvent({
+              userId,
+              campaignId,
+              emailId: email.id,
+              recipientEmail: email.contacts.email,
+              progress: Math.round(((processedCount + 1) / totalEmails) * 100),
+              sent: sentCount,
+              failed: failedCount,
+              total: totalEmails,
+              timestamp: new Date().toISOString(),
+            });
+          }
         } else {
+          console.error(`${emailLogPrefix} ❌ Failed to send to ${email.contacts.email}: ${sendResult.errorCode} - ${sendResult.errorMessage}`);
+          console.error(`${emailLogPrefix} Error details:`, {
+            errorCode: sendResult.errorCode,
+            errorMessage: sendResult.errorMessage,
+            emailId: email.id,
+            recipientEmail: email.contacts.email,
+            campaignId: email.campaign_id,
+            userId
+          });
           await updateEmailStatus(email.id, 'failed', null, sendResult.errorMessage, emailLogPrefix);
           failedCount++;
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`${emailLogPrefix} ⚠️ Unexpected error sending to ${email.contacts.email}:`, {
+          error: error,
+          stack: error instanceof Error ? error.stack : undefined,
+          emailId: email.id,
+          recipientEmail: email.contacts.email,
+          campaignId: email.campaign_id,
+          userId,
+          errorType: error instanceof Error ? error.constructor.name : typeof error
+        });
         await updateEmailStatus(email.id, 'failed', null, errorMsg, emailLogPrefix);
         failedCount++;
       }
 
       processedCount++;
-      await job.updateProgress({
-        percentage: Math.round((processedCount / totalEmails) * 100),
-        sent: sentCount,
-        failed: failedCount,
-        total: totalEmails,
-      });
+      const progressPercentage = Math.round((processedCount / totalEmails) * 100);
+
+      // Batch progress updates to reduce Redis commands
+      if (processedCount % PROGRESS_UPDATE_INTERVAL === 0 || processedCount === totalEmails) {
+        console.log(`${emailLogPrefix} 📊 Updating batch job progress: ${progressPercentage}% (${sentCount} sent, ${failedCount} failed, ${totalEmails} total)`);
+
+        const progressUpdateStartTime = Date.now();
+        await job.updateProgress({
+          percentage: progressPercentage,
+          sent: sentCount,
+          failed: failedCount,
+          total: totalEmails,
+        });
+        const progressUpdateDuration = Date.now() - progressUpdateStartTime;
+
+        console.log(`${emailLogPrefix} ✅ Batch job progress updated in ${progressUpdateDuration}ms`);
+      }
 
       // Rate limiting
+      console.log(`${emailLogPrefix} ⏱️ Applying batch rate limiting delay (200ms) before next email`);
+      const delayStartTime = Date.now();
       await delay(200);
+      const actualDelay = Date.now() - delayStartTime;
+      console.log(`${emailLogPrefix} ✅ Batch rate limiting delay completed (actual: ${actualDelay}ms)`);
     }
 
     // Move to next batch

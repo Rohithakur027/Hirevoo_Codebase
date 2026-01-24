@@ -1,3 +1,7 @@
+// IMPORTANT: Load environment variables FIRST before any other imports
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+
 /**
  * workers/index.ts
  *
@@ -46,9 +50,12 @@
  */
 
 import { Worker, QueueEvents, Job } from 'bullmq';
-import { redis, closeRedisConnection } from '../lib/queue/config';
+import { getRedis, closeRedisConnection } from '../lib/queue/config';
 import { processCampaign, processCampaignInBatches } from './jobs/send-campaign';
 import type { SendCampaignJobData, SendCampaignJobResult } from '../lib/queue/email-queue';
+
+// Get the Redis connection once at startup
+const redis = getRedis();
 
 // ============================================================
 // CONFIGURATION
@@ -170,7 +177,7 @@ ${logPrefix} ❌ Job failed
   },
 
   // ─────────────────────────────────────────────────────────
-  // WORKER OPTIONS
+  // WORKER OPTIONS (OPTIMIZED FOR UPSTASH FREE TIER)
   // ─────────────────────────────────────────────────────────
   {
     // Use our configured Redis connection
@@ -186,16 +193,51 @@ ${logPrefix} ❌ Job failed
     lockDuration: CONFIG.LOCK_DURATION,
     lockRenewTime: CONFIG.LOCK_RENEW_TIME,
 
-    // Stalled job checking
-    // If a job doesn't complete within lockDuration, it's considered stalled
-    // and can be picked up by another worker
-    stalledInterval: 30000, // Check every 30 seconds
+    // =========================================================
+    // POLLING OPTIMIZATION (CRITICAL FOR UPSTASH FREE TIER)
+    // =========================================================
+    // drainDelay: How long to wait before polling when queue is empty
+    // DEFAULT is 5ms (!!) which causes ~200 commands/second when idle!
+    // Setting to 10 seconds reduces idle polling to ~6 commands/minute
+    drainDelay: 10000, // 10 seconds (10000ms) between polls when queue is empty
+
+    // =========================================================
+    // STALLED JOB SETTINGS (REDUCED FREQUENCY)
+    // =========================================================
+    // stalledInterval: How often to check for stalled jobs
+    // DEFAULT is 30 seconds which is too aggressive for free tier
+    // 5 minutes is sufficient for most use cases
+    stalledInterval: 300000, // 5 minutes (was 30 seconds)
     maxStalledCount: 2, // Allow 2 stalls before marking as failed
 
-    // Metrics collection (optional, for monitoring)
-    metrics: {
-      maxDataPoints: 1000, // Keep last 1000 data points
+    // =========================================================
+    // JOB CLEANUP SETTINGS (PREVENT STORAGE BLOAT)
+    // =========================================================
+    // Automatically remove completed/failed jobs to save storage
+    // and reduce Redis memory usage
+    removeOnComplete: {
+      count: 100, // Keep last 100 completed jobs for debugging
+      age: 24 * 3600, // Remove jobs older than 24 hours
     },
+    removeOnFail: {
+      count: 50, // Keep last 50 failed jobs for analysis
+      age: 7 * 24 * 3600, // Keep failed jobs for 7 days
+    },
+
+    // =========================================================
+    // RATE LIMITING (OPTIONAL - EXTRA PROTECTION)
+    // =========================================================
+    // Uncomment if you want to limit job processing rate
+    // limiter: {
+    //   max: 10, // Max 10 jobs
+    //   duration: 1000, // Per second
+    // },
+
+    // Metrics collection disabled to reduce overhead
+    // Uncomment if you need monitoring metrics
+    // metrics: {
+    //   maxDataPoints: 1000,
+    // },
   }
 );
 
@@ -209,10 +251,20 @@ ${logPrefix} ❌ Job failed
  * Unlike worker events (which fire only for jobs processed by THIS worker),
  * QueueEvents fires for ALL jobs in the queue, regardless of which worker
  * processes them. Useful for dashboards and monitoring.
+ *
+ * NOTE: QueueEvents uses Redis XREAD blocking commands which consume
+ * Redis commands on each poll. For Upstash free tier, we increase the
+ * blockingTimeout significantly to reduce polling frequency.
+ *
+ * OPTIMIZATION: Increased blockingTimeout from 10s to 60s to reduce
+ * Redis command usage by ~6x during idle periods.
  */
 const queueEvents = new QueueEvents(CONFIG.QUEUE_NAME, {
   connection: redis,
   prefix: CONFIG.PREFIX,
+  // Increase blocking timeout to reduce command usage
+  // Default is 10000ms (10s), we increase to 60s for Upstash free tier
+  blockingTimeout: 60000,
 });
 
 // Log when jobs are waiting in queue
@@ -279,13 +331,17 @@ worker.on('active', (job: Job) => {
   console.log(`[Worker] Job ${job.id} is now active`);
 });
 
-// Fired when job progress is updated
+// Fired when job progress is updated (batched, so less frequent now)
 worker.on('progress', (job: Job, progress: number | object) => {
   const progressData = typeof progress === 'object' ? progress : { percentage: progress };
-  console.log(
-    `[Worker] Job ${job.id} progress:`,
-    JSON.stringify(progressData)
-  );
+  // Only log significant progress milestones to reduce console noise
+  const pct = typeof progress === 'object' && 'percentage' in progress ? (progress as { percentage: number }).percentage : 0;
+  if (pct % 25 === 0 || pct === 100) {
+    console.log(
+      `[Worker] Job ${job.id} progress: ${pct}%`,
+      JSON.stringify(progressData)
+    );
+  }
 });
 
 // Fired when a job is stalled

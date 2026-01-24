@@ -30,7 +30,7 @@
  */
 
 import { Queue, type JobsOptions } from 'bullmq';
-import { redis } from './config';
+import { getRedis } from './config';
 
 // ============================================================
 // TYPE DEFINITIONS
@@ -144,7 +144,7 @@ const defaultJobOptions: JobsOptions = {
 };
 
 /**
- * The main email queue instance.
+ * Get the main email queue instance.
  *
  * This queue handles all email campaign jobs. Jobs are added by the
  * API route and processed by the worker.
@@ -153,31 +153,43 @@ const defaultJobOptions: JobsOptions = {
  * - Used to identify this queue in Redis
  * - Multiple queues can coexist (e.g., 'emails', 'notifications', 'reports')
  */
-export const emailQueue = new Queue<SendCampaignJobData, SendCampaignJobResult>(
-  'emails',
-  {
-    // Use our configured Redis connection
-    connection: redis,
 
-    // Apply default job options to all jobs
-    defaultJobOptions,
+// Lazy-loaded queue instance
+let emailQueueInstance: Queue<SendCampaignJobData, SendCampaignJobResult> | null = null;
 
-    // ─────────────────────────────────────────────────────────
-    // QUEUE-LEVEL SETTINGS
-    // ─────────────────────────────────────────────────────────
-    // Prefix for Redis keys. Useful when sharing Redis with other apps.
-    // Keys will be: bull:hirevoo:emails:* (jobs, events, etc.)
-    prefix: 'bull:hirevoo',
+export function getEmailQueue(): Queue<SendCampaignJobData, SendCampaignJobResult> {
+  if (!emailQueueInstance) {
+    emailQueueInstance = new Queue<SendCampaignJobData, SendCampaignJobResult>(
+      'emails',
+      {
+        // Use our configured Redis connection
+        connection: getRedis(),
 
-    // Stream configuration for job events
-    streams: {
-      // How long to keep job events in the stream (for monitoring)
-      events: {
-        maxLen: 10000, // Keep last 10,000 events
-      },
-    },
+        // Apply default job options to all jobs
+        defaultJobOptions,
+
+        // ─────────────────────────────────────────────────────────
+        // QUEUE-LEVEL SETTINGS
+        // ─────────────────────────────────────────────────────────
+        // Prefix for Redis keys. Useful when sharing Redis with other apps.
+        // Keys will be: bull:hirevoo:emails:* (jobs, events, etc.)
+        prefix: 'bull:hirevoo',
+
+        // Stream configuration for job events
+        streams: {
+          // How long to keep job events in the stream (for monitoring)
+          events: {
+            maxLen: 10000, // Keep last 10,000 events
+          },
+        },
+      }
+    );
   }
-);
+  return emailQueueInstance;
+}
+
+// For backward compatibility, export the lazy-loaded instance
+export const emailQueue = getEmailQueue();
 
 // ============================================================
 // QUEUE HELPER FUNCTIONS

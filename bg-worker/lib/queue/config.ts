@@ -21,14 +21,13 @@
  *
  * @module lib/queue/config
  */
-
 import Redis from 'ioredis';
 
 /**
- * Redis connection options optimized for BullMQ and production use.
+ * Redis connection options optimized for BullMQ and Upstash Free Tier.
  *
- * These settings ensure reliable job processing even under network
- * instability or Redis server restarts.
+ * IMPORTANT: These settings are specifically tuned to minimize Redis
+ * command usage for Upstash's free tier (500k commands/month).
  */
 const redisOptions = {
   // ============================================================
@@ -45,31 +44,35 @@ const redisOptions = {
   enableReadyCheck: false,
 
   // ============================================================
-  // CONNECTION RETRY SETTINGS
+  // NETWORK SETTINGS (IPv6 fix for Node.js 17+)
   // ============================================================
-  // When Redis connection is lost, ioredis will automatically
-  // attempt to reconnect. This function controls the delay between
-  // reconnection attempts using exponential backoff.
+  // Prevents DNS lookup issues on Node.js 17+ where IPv6 is
+  // preferred but may not be available, causing connection failures.
+  family: 0, // 0 = auto, 4 = IPv4 only, 6 = IPv6 only
+
+  // ============================================================
+  // CONNECTION RETRY SETTINGS (OPTIMIZED FOR UPSTASH FREE TIER)
+  // ============================================================
+  // TRUE exponential backoff to prevent reconnection loops from
+  // burning through your monthly command quota.
   retryStrategy: (times: number): number | null => {
-    // Maximum retry attempts before giving up
-    const maxRetries = 50;
+    const maxRetries = 20; // Reduced from 50 to fail faster if truly disconnected
 
     if (times > maxRetries) {
-      // After 50 failed attempts, stop retrying and let the error bubble up.
-      // In production, this should trigger an alert to the operations team.
       console.error(
         `[Redis] Maximum reconnection attempts (${maxRetries}) exceeded. Giving up.`
       );
-      return null; // Stop retrying
+      return null;
     }
 
-    // Calculate delay with exponential backoff
-    // Attempt 1: 100ms, Attempt 2: 200ms, Attempt 3: 400ms, etc.
-    // Cap at 30 seconds to avoid extremely long delays
-    const delay = Math.min(times * 100, 30000);
+    // TRUE exponential backoff: 1s, 2s, 4s, 8s, 16s, 20s (capped)
+    // This prevents the "10 retries per second" death spiral
+    const baseDelay = 1000; // Start at 1 second (not 100ms!)
+    const maxDelay = 20000; // Cap at 20 seconds
+    const delay = Math.min(baseDelay * Math.pow(2, times - 1), maxDelay);
 
     console.warn(
-      `[Redis] Connection lost. Attempting reconnect #${times} in ${delay}ms...`
+      `[Redis] Connection lost. Reconnect attempt #${times} in ${delay / 1000}s...`
     );
 
     return delay;
@@ -78,28 +81,40 @@ const redisOptions = {
   // ============================================================
   // TIMEOUT SETTINGS
   // ============================================================
-  // Maximum time (ms) to wait for initial connection
-  connectTimeout: 10000, // 10 seconds
-
-  // Maximum time (ms) to wait for a command to complete
-  // Set higher for blocking commands used by BullMQ
-  commandTimeout: 60000, // 60 seconds
+  connectTimeout: 15000, // 15 seconds (increased for Upstash cold starts)
+  // NOTE: commandTimeout is intentionally NOT set here.
+  // BullMQ uses blocking commands (BRPOPLPUSH, XREAD) that can block
+  // indefinitely waiting for jobs. Setting a timeout causes errors
+  // when the queue is idle. ioredis default is 0 (no timeout).
 
   // ============================================================
   // KEEP-ALIVE SETTINGS
   // ============================================================
-  // Send TCP keep-alive packets every 30 seconds to detect
-  // broken connections early. This is especially important
-  // for cloud Redis services like Upstash.
-  keepAlive: 30000, // 30 seconds
+  // Increased to reduce command chatter while still detecting
+  // broken connections. Upstash connections are stable.
+  keepAlive: 60000, // 60 seconds (was 30s)
 
   // ============================================================
-  // TLS/SSL SETTINGS
+  // TLS SETTINGS FOR UPSTASH
   // ============================================================
-  // Upstash Redis requires TLS. The 'rediss://' protocol in the
-  // connection URL automatically enables TLS, but we can also
-  // set it explicitly for clarity.
-  // tls: {} // Uncomment if your REDIS_URL doesn't start with 'rediss://'
+  // Upstash requires TLS. The 'rediss://' URL prefix enables it
+  // automatically, but we add explicit config for edge cases.
+  tls: {
+    rejectUnauthorized: false, // Required for some Upstash regions
+  },
+
+  // ============================================================
+  // RECONNECT SETTINGS
+  // ============================================================
+  // Don't aggressively reconnect - wait and retry gracefully
+  reconnectOnError: (err: Error): boolean | 1 | 2 => {
+    const targetErrors = ['READONLY', 'ECONNRESET', 'ETIMEDOUT'];
+    if (targetErrors.some((e) => err.message.includes(e))) {
+      console.warn(`[Redis] Reconnectable error: ${err.message}`);
+      return 1; // Reconnect and retry the failed command
+    }
+    return false;
+  },
 };
 
 /**
@@ -109,6 +124,7 @@ const redisOptions = {
  */
 function validateRedisUrl(): string {
   const redisUrl = process.env.REDIS_URL;
+  console.log('redisUrl', redisUrl);
 
   if (!redisUrl) {
     throw new Error(
@@ -145,7 +161,7 @@ function validateRedisUrl(): string {
  * subscriber.subscribe('email:sent');
  */
 export function createRedisConnection(connectionName?: string): Redis {
-  const redisUrl = validateRedisUrl();
+  const redisUrl = process.env.REDIS_URL;
 
   const connection = new Redis(redisUrl, {
     ...redisOptions,
@@ -227,12 +243,36 @@ export function createRedisConnection(connectionName?: string): Redis {
  * pooling internally, so one connection is sufficient.
  *
  * @example
- * import { redis } from '@/lib/queue/config';
+ * import { getRedis } from '@/lib/queue/config';
  * import { Queue } from 'bullmq';
  *
- * const queue = new Queue('emails', { connection: redis });
+ * const queue = new Queue('emails', { connection: getRedis() });
  */
-export const redis = createRedisConnection('bullmq-main');
+
+// Lazy-loaded Redis connection to ensure environment variables are available
+let redisInstance: Redis | null = null;
+
+export function getRedis(): Redis {
+  if (!redisInstance) {
+    // Validate environment variables here, when Redis is actually needed
+    validateRedisUrl();
+    redisInstance = createRedisConnection('bullmq-main');
+  }
+  return redisInstance;
+}
+
+// For backward compatibility, export a function that returns the Redis instance
+// This ensures Redis connection is only created when actually needed
+export function getRedisConnection(): Redis {
+  return getRedis();
+}
+
+// Keep the old export name for backward compatibility, but make it a getter
+Object.defineProperty(module.exports, 'redis', {
+  get: getRedis,
+  enumerable: true,
+  configurable: false
+});
 
 /**
  * Gracefully closes the Redis connection.
@@ -250,14 +290,21 @@ export const redis = createRedisConnection('bullmq-main');
 export async function closeRedisConnection(): Promise<void> {
   console.log('[Redis] Closing connection gracefully...');
 
+  if (!redisInstance) {
+    console.log('[Redis] No active connection to close');
+    return;
+  }
+
   try {
     // quit() sends the QUIT command and waits for pending commands
-    await redis.quit();
+    await redisInstance.quit();
     console.log('[Redis] Connection closed successfully');
   } catch (error) {
     // If quit fails (e.g., connection already closed), force disconnect
     console.warn('[Redis] Graceful close failed, forcing disconnect');
-    redis.disconnect();
+    redisInstance.disconnect();
+  } finally {
+    redisInstance = null;
   }
 }
 
@@ -278,7 +325,7 @@ export async function closeRedisConnection(): Promise<void> {
 export async function isRedisHealthy(): Promise<boolean> {
   try {
     // PING returns 'PONG' if the connection is healthy
-    const response = await redis.ping();
+    const response = await getRedis().ping();
     return response === 'PONG';
   } catch (error) {
     console.error('[Redis] Health check failed:', error);
