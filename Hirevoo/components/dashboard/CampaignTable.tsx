@@ -1,6 +1,4 @@
-"use client"
-
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -11,99 +9,54 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { Search } from "lucide-react"
+import { Search, Loader2, FolderOpen } from "lucide-react"
+import Link from "next/link"
 
 interface Campaign {
     id: string
     name: string
-    location: string
-    sent: number
-    replyRate: string
-    ctrRate: string
-    createdDate: string
+    status: string
+    contactCount: number
+    createdAt: string
+    updatedAt: string
+    sentAt: string | null
 }
-
-const campaigns: Campaign[] = [
-    {
-        id: "1",
-        name: "Solaris Sparkle",
-        location: "Miami, Florida",
-        sent: 102,
-        replyRate: "12.50%",
-        ctrRate: "8.2%",
-        createdDate: "Jan 12, 2024",
-    },
-    {
-        id: "2",
-        name: "Crimson Dusk",
-        location: "Denver, Colorado",
-        sent: 214,
-        replyRate: "07.65%",
-        ctrRate: "5.8%",
-        createdDate: "Jan 15, 2024",
-    },
-    {
-        id: "3",
-        name: "Indigo Zephyr",
-        location: "Orlando, Florida",
-        sent: 143,
-        replyRate: "16.40%",
-        ctrRate: "11.3%",
-        createdDate: "Jan 18, 2024",
-    },
-    {
-        id: "4",
-        name: "Roseate Crest",
-        location: "Las Vegas, Nevada",
-        sent: 185,
-        replyRate: "23.64%",
-        ctrRate: "15.7%",
-        createdDate: "Jan 20, 2024",
-    },
-    {
-        id: "5",
-        name: "Azure Summit",
-        location: "Seattle, Washington",
-        sent: 256,
-        replyRate: "19.22%",
-        ctrRate: "12.4%",
-        createdDate: "Jan 22, 2024",
-    },
-    {
-        id: "6",
-        name: "Golden Wave",
-        location: "San Francisco, California",
-        sent: 312,
-        replyRate: "21.45%",
-        ctrRate: "14.1%",
-        createdDate: "Jan 25, 2024",
-    },
-    {
-        id: "7",
-        name: "Silver Storm",
-        location: "Chicago, Illinois",
-        sent: 178,
-        replyRate: "14.88%",
-        ctrRate: "9.6%",
-        createdDate: "Jan 28, 2024",
-    },
-    {
-        id: "8",
-        name: "Emerald Peak",
-        location: "Austin, Texas",
-        sent: 289,
-        replyRate: "25.10%",
-        ctrRate: "16.8%",
-        createdDate: "Jan 30, 2024",
-    },
-]
 
 export function CampaignTable() {
     const [searchQuery, setSearchQuery] = useState("")
+    const [campaigns, setCampaigns] = useState<Campaign[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+
+    useEffect(() => {
+        const fetchCampaigns = async () => {
+            try {
+                const response = await fetch('/api/campaigns')
+                if (response.ok) {
+                    const data = await response.json()
+                    setCampaigns(data.campaigns || [])
+                }
+            } catch (error) {
+                console.error("Failed to fetch campaigns:", error)
+            } finally {
+                setIsLoading(false)
+            }
+        }
+
+        fetchCampaigns()
+    }, [])
 
     const filteredCampaigns = campaigns.filter((campaign) =>
         campaign.name.toLowerCase().includes(searchQuery.toLowerCase())
     )
+
+    // Format date helper
+    const formatDate = (dateString: string) => {
+        return new Date(dateString).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        })
+    }
 
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden">
@@ -139,30 +92,60 @@ export function CampaignTable() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {filteredCampaigns.map((campaign) => (
-                            <TableRow key={campaign.id} className="border-b border-gray-50">
-                                <TableCell className="py-3">
-                                    <span className="text-sm font-medium text-gray-800">
-                                        {campaign.name}
-                                    </span>
-                                </TableCell>
-                                <TableCell className="py-3">
-                                    <span className="text-sm text-gray-500">{campaign.createdDate}</span>
-                                </TableCell>
-                                <TableCell className="py-3">
-                                    <span className="text-sm text-gray-600">{campaign.ctrRate}</span>
-                                </TableCell>
-                                <TableCell className="py-3">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="text-xs h-7 px-3 border-emerald-500 text-emerald-600 hover:bg-emerald-50 bg-transparent"
-                                    >
-                                        Manage
-                                    </Button>
+                        {isLoading ? (
+                            <TableRow>
+                                <TableCell colSpan={4} className="h-24 text-center">
+                                    <div className="flex items-center justify-center text-gray-500">
+                                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                        Loading campaigns...
+                                    </div>
                                 </TableCell>
                             </TableRow>
-                        ))}
+                        ) : filteredCampaigns.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={4} className="h-48 text-center text-gray-500">
+                                    <div className="flex flex-col items-center justify-center p-6">
+                                        <div className="bg-gray-50 p-4 rounded-2xl mb-3">
+                                            <div className="relative">
+                                                <FolderOpen className="w-8 h-8 text-gray-300" />
+                                                <Plus className="w-3 h-3 text-gray-400 absolute -bottom-1 -right-1 bg-white rounded-full" />
+                                            </div>
+                                        </div>
+                                        <p className="text-sm font-medium text-gray-900">No Recent Campaigns.</p>
+                                        <p className="text-xs text-gray-500 mt-1 max-w-[200px]">
+                                            Click '+ Create New Campaign' to get started.
+                                        </p>
+                                    </div>
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            filteredCampaigns.map((campaign) => (
+                                <TableRow key={campaign.id} className="border-b border-gray-50">
+                                    <TableCell className="py-3">
+                                        <span className="text-sm font-medium text-gray-800">
+                                            {campaign.name}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell className="py-3">
+                                        <span className="text-sm text-gray-500">{formatDate(campaign.createdAt)}</span>
+                                    </TableCell>
+                                    <TableCell className="py-3">
+                                        <span className="text-sm text-gray-400">—</span>
+                                    </TableCell>
+                                    <TableCell className="py-3">
+                                        <Link href={`/campaigns/${campaign.id}`}>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="text-xs h-7 px-3 border-emerald-500 text-emerald-600 hover:bg-emerald-50 bg-transparent"
+                                            >
+                                                Manage
+                                            </Button>
+                                        </Link>
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
                     </TableBody>
                 </Table>
             </div>

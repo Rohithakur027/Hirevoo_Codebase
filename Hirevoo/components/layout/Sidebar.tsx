@@ -20,6 +20,8 @@ import { useSession } from "@/app/hooks/use-session"
 import { useState, useEffect } from "react"
 import ConnectGmailModal, { PermissionLevel } from "@/components/dashboard/ConnectGmailModal"
 import { signOut } from "next-auth/react"
+import { useGmail } from "@/components/providers/gmail-provider"
+import { toast } from "sonner"
 
 const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
@@ -41,32 +43,19 @@ export function SideBar() {
     const { user, isLoading } = useSession()
     const [isDisconnecting, setIsDisconnecting] = useState(false)
     const [isConnecting, setIsConnecting] = useState(false)
-    const [gmailStatus, setGmailStatus] = useState<GmailStatusData>({
-        isConnected: false,
-        permissionLevel: null,
-        email: null,
-    })
+    const { isConnected, permissionLevel, email: gmailEmail, checkStatus } = useGmail()
+
+    // Derived state to match existing usage patterns without rewriting everything
+    const gmailStatus = {
+        isConnected,
+        permissionLevel: permissionLevel as 'SEND_ONLY' | 'FULL_ACCESS' | null,
+        email: gmailEmail
+    }
+
     const [showConnectModal, setShowConnectModal] = useState(false)
     const userInitials = user?.name
         ? user.name.split(" ").map((n: string) => n[0]).join("").toUpperCase()
         : "?"
-
-    // Check Gmail connection status
-    const checkGmailStatus = async () => {
-        try {
-            const response = await fetch('/api/auth/gmail/status')
-            if (response.ok) {
-                const data = await response.json()
-                setGmailStatus({
-                    isConnected: data.isConnected || false,
-                    permissionLevel: data.permissionLevel || null,
-                    email: data.email || null,
-                })
-            }
-        } catch (error) {
-            console.error('Error checking Gmail status:', error)
-        }
-    }
 
     // Handle Gmail connect/disconnect
     const handleGmailAction = async () => {
@@ -84,11 +73,8 @@ export function SideBar() {
                 })
 
                 if (response.ok) {
-                    setGmailStatus({
-                        isConnected: false,
-                        permissionLevel: null,
-                        email: null,
-                    })
+                    // Update global state
+                    await checkStatus()
                 } else {
                     const errorData = await response.json().catch(() => ({}))
                     console.error('Failed to disconnect Gmail:', errorData)
@@ -127,11 +113,11 @@ export function SideBar() {
                 window.location.href = data.url
             } else {
                 console.error('Failed to get Gmail connect URL')
-                alert('Failed to connect Gmail. Please try again.')
+                toast.error('Failed to connect Gmail. Please try again.')
             }
         } catch (error) {
             console.error('Error connecting Gmail:', error)
-            alert('Error connecting Gmail. Please try again.')
+            toast.error('Error connecting Gmail. Please try again.')
         } finally {
             setIsConnecting(false)
         }
@@ -140,39 +126,6 @@ export function SideBar() {
     // Handle logout
     const handleLogout = async () => {
         await signOut({ callbackUrl: '/login' })
-    }
-
-    // Check Gmail status on component mount and periodically
-    useEffect(() => {
-        checkGmailStatus()
-
-        // Check Gmail status every 30 seconds
-        const interval = setInterval(checkGmailStatus, 30000)
-
-        // Also check when the page becomes visible (user switches tabs)
-        const handleVisibilityChange = () => {
-            if (!document.hidden) {
-                checkGmailStatus()
-            }
-        }
-
-        document.addEventListener('visibilitychange', handleVisibilityChange)
-
-        return () => {
-            clearInterval(interval)
-            document.removeEventListener('visibilitychange', handleVisibilityChange)
-        }
-    }, [])
-
-    // Truncate email for display
-    const truncateEmail = (email: string | null, maxLength: number = 20) => {
-        if (!email) return null
-        if (email.length <= maxLength) return email
-        const [localPart, domain] = email.split('@')
-        if (localPart.length > maxLength - 5) {
-            return `${localPart.substring(0, maxLength - 8)}...@${domain}`
-        }
-        return email
     }
 
     return (
@@ -226,11 +179,11 @@ export function SideBar() {
                     onClick={handleGmailAction}
                     disabled={isDisconnecting || isConnecting}
                     className={cn(
-                        "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors w-full rounded-sm",
+                        "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors w-full rounded-full border shadow-sm",
                         gmailStatus.isConnected
-                            ? "bg-green-50 hover:bg-green-100 text-green-700 border border-green-200"
-                            : "bg-black hover:bg-gray-800 text-white",
-                        collapsed ? "justify-center px-2" : ""
+                            ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
+                            : "bg-white hover:bg-gray-50 text-gray-700 border-gray-200",
+                        collapsed ? "justify-center px-2" : "justify-center"
                     )}
                 >
                     {gmailStatus.isConnected ? (
@@ -243,36 +196,20 @@ export function SideBar() {
                             {isDisconnecting
                                 ? 'Disconnecting...'
                                 : isConnecting
-                                ? 'Connecting...'
-                                : gmailStatus.isConnected
-                                ? 'Gmail Connected'
-                                : 'Connect Gmail'
+                                    ? 'Connecting...'
+                                    : gmailStatus.isConnected
+                                        ? 'Gmail Connected'
+                                        : 'Connect Gmail'
                             }
                         </span>
                     )}
                 </button>
-
-                {/* Show connected email when expanded and connected */}
-                {!collapsed && gmailStatus.isConnected && gmailStatus.email && (
-                    <div className="mt-2 px-3">
-                        <p className="text-xs text-gray-500 truncate" title={gmailStatus.email}>
-                            {truncateEmail(gmailStatus.email)}
-                        </p>
-                        <button
-                            onClick={handleGmailAction}
-                            disabled={isDisconnecting}
-                            className="text-xs text-red-500 hover:text-red-700 mt-1"
-                        >
-                            {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
-                        </button>
-                    </div>
-                )}
             </div>
 
             {/* User Profile */}
             <div className="px-3 py-4 border-t border-gray-100 flex-shrink-0">
                 <div className={cn(
-                    "flex items-center gap-3",
+                    "flex items-center gap-3 mb-4",
                     collapsed ? "justify-center" : ""
                 )}>
                     <Avatar className="w-10 h-10">
@@ -284,13 +221,9 @@ export function SideBar() {
                             {isLoading ? (
                                 <div className="space-y-1">
                                     <div className="h-4 w-20 bg-gray-200 rounded animate-pulse" />
-                                    <div className="h-3 w-16 bg-gray-100 rounded animate-pulse" />
                                 </div>
                             ) : (
-                                <>
-                                    <p className="text-sm font-medium text-gray-800 truncate">{user?.name || "Guest"}</p>
-                                    <p className="text-xs text-gray-500 truncate">{user?.email || "Not logged in"}</p>
-                                </>
+                                <p className="text-sm font-bold text-gray-800 truncate uppercase">{user?.name || "GUEST USER"}</p>
                             )}
                         </div>
                     )}
@@ -298,7 +231,7 @@ export function SideBar() {
                 {!collapsed && (
                     <button
                         onClick={handleLogout}
-                        className="flex items-center gap-2 mt-4 text-sm text-gray-500 hover:text-gray-700"
+                        className="flex items-center justify-center gap-2 w-full text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
                     >
                         <LogOut className="w-4 h-4" />
                         <span>Log Out</span>

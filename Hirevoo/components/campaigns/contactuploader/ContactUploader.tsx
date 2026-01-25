@@ -109,7 +109,7 @@ export default function UploadContacts() {
               const nameKey = Object.keys(row).find(key => key.toLowerCase().includes('name'))
               const companyKey = Object.keys(row).find(key => key.toLowerCase().includes('company'))
               const roleKey = Object.keys(row).find(key => key.toLowerCase().includes('role') || key.toLowerCase().includes('title'))
-              
+
               parsedContacts.push({
                 id: crypto.randomUUID(),
                 email,
@@ -132,10 +132,7 @@ export default function UploadContacts() {
     })
   }
 
-  // Google Drive integration using Google Picker API
-  const handleConnectGoogleDrive = () => {
-    alert('Google Drive integration: Please set up OAuth 2.0 credentials to enable this feature. For now, you can use the file upload option.')
-  }
+
 
   // Import from Google Sheet
   const handleImportSheet = async () => {
@@ -181,11 +178,11 @@ export default function UploadContacts() {
   const handleSaveEdit = (id: string) => {
     if (editingEmail.trim()) {
       setRecipients((prev) =>
-        prev.map((r) => r.id === id ? { 
-          ...r, 
-          email: editingEmail.trim(), 
+        prev.map((r) => r.id === id ? {
+          ...r,
+          email: editingEmail.trim(),
           name: editingEmail.split('@')[0],
-          isValid: isValidEmail(editingEmail.trim()) 
+          isValid: isValidEmail(editingEmail.trim())
         } : r)
       )
     }
@@ -199,7 +196,7 @@ export default function UploadContacts() {
   }
 
   const validCount = recipients.filter((r) => r.isValid).length
-  
+
   // Calculate duplicates
   const findDuplicates = () => {
     const emailCounts = recipients.reduce((acc: any, r) => {
@@ -207,12 +204,12 @@ export default function UploadContacts() {
       acc[email] = (acc[email] || 0) + 1
       return acc
     }, {})
-    
+
     return Object.values(emailCounts).reduce((sum: number, count: any) => {
       return sum + (count > 1 ? count - 1 : 0)
     }, 0)
   }
-  
+
   const duplicateCount = findDuplicates()
 
   return (
@@ -239,10 +236,10 @@ export default function UploadContacts() {
 
       {/* Main Content - Two Column Layout, No Page Scroll */}
       <div className="flex-1 p-1 grid grid-cols-2 gap-2 overflow-hidden min-h-0">
-        
+
         {/* Left Column - All Input Options Stacked Vertically */}
         <div className="space-y-2 flex flex-col h-full justify-start">
-          
+
           {/* Add Recipients Card */}
           <Card className="flex-shrink">
             <CardHeader className="py-2">
@@ -262,7 +259,7 @@ export default function UploadContacts() {
                   />
                   <Button
                     onClick={handleAddEmail}
-                    className="bg-[#7c3aed] text-white px-3 h-8 text-xs hover:bg-[#6d28d9] font-medium"
+                    className="bg-black text-white px-3 h-8 text-xs hover:bg-gray-800 font-medium rounded-[6px]"
                   >
                     Add Email
                   </Button>
@@ -296,7 +293,7 @@ export default function UploadContacts() {
               <div className="flex justify-end pt-1">
                 <Button
                   onClick={handleImportSheet}
-                  className="bg-[#7c3aed] text-white hover:bg-[#6d28d9] h-8 text-xs px-4 font-medium"
+                  className="bg-black text-white hover:bg-gray-800 h-8 text-xs px-4 font-medium rounded-[6px]"
                 >
                   Import Sheet
                 </Button>
@@ -313,17 +310,10 @@ export default function UploadContacts() {
               <div className="flex gap-2">
                 <Button
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex-1 border-2 border-[#7c3aed] text-[#7c3aed] bg-white flex items-center justify-center gap-1 h-10 text-xs font-medium hover:bg-purple-50 transition-colors"
+                  className="flex-1 bg-black text-white flex items-center justify-center gap-1 h-9 text-xs font-medium hover:bg-gray-800 transition-colors rounded-[6px]"
                 >
                   <FileText className="h-4 w-4" />
                   Browse from Computer
-                </Button>
-                <Button
-                  onClick={handleConnectGoogleDrive}
-                  className="flex-1 border-2 border-[#7c3aed] text-[#7c3aed] bg-white flex items-center justify-center gap-1 h-10 text-xs font-medium hover:bg-purple-50 transition-colors"
-                >
-                  <HardDrive className="h-4 w-4" />
-                  Connect Google Drive
                 </Button>
               </div>
 
@@ -351,16 +341,16 @@ export default function UploadContacts() {
                 <span className="text-xs text-amber-800 flex-1">
                   {duplicateCount} duplicate{duplicateCount > 1 ? 's' : ''} found
                 </span>
-                <Button 
-                  onClick={removeDuplicates} 
-                  className="border border-amber-400 bg-white text-amber-700 h-7 text-xs px-3 hover:bg-amber-50 font-medium"
+                <Button
+                  onClick={removeDuplicates}
+                  className="bg-black text-white h-7 text-xs px-3 hover:bg-gray-800 font-medium rounded-[4px]"
                 >
                   Remove
                 </Button>
               </div>
             )}
           </CardHeader>
-          
+
           {/* Scrollable Email List - ISOLATED SCROLL */}
           <div className="flex-1 overflow-y-auto px-2 min-h-0">
             {recipients.length === 0 ? (
@@ -386,15 +376,15 @@ export default function UploadContacts() {
                           }}
                           autoFocus
                         />
-                        <Button 
-                          onClick={() => handleSaveEdit(recipient.id)} 
-                          className="bg-[#7c3aed] text-white h-8 px-3 text-xs font-medium"
+                        <Button
+                          onClick={() => handleSaveEdit(recipient.id)}
+                          className="bg-black text-white h-8 px-3 text-xs font-medium rounded-[4px]"
                         >
                           Save
                         </Button>
-                        <Button 
-                          onClick={handleCancelEdit} 
-                          className="border border-gray-300 bg-white text-gray-700 h-8 px-3 text-xs hover:bg-gray-50 font-medium"
+                        <Button
+                          onClick={handleCancelEdit}
+                          className="bg-white text-black border border-gray-300 h-8 px-3 text-xs hover:bg-gray-50 font-medium rounded-[4px]"
                         >
                           Cancel
                         </Button>
@@ -402,9 +392,8 @@ export default function UploadContacts() {
                     ) : (
                       <>
                         <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className={`h-5 w-5 rounded flex items-center justify-center flex-shrink-0 ${
-                            recipient.isValid ? "bg-green-500" : "bg-red-500"
-                          }`}>
+                          <div className={`h-5 w-5 rounded flex items-center justify-center flex-shrink-0 ${recipient.isValid ? "bg-green-500" : "bg-red-500"
+                            }`}>
                             <Check className="h-3 w-3 text-white" />
                           </div>
                           <div className={`text-sm truncate ${recipient.isValid ? "text-gray-800" : "text-red-500"}`}>
@@ -445,7 +434,7 @@ export default function UploadContacts() {
             <div className="flex items-center justify-between">
               <span className="text-3xl font-bold text-gray-800">{validCount}</span>
               <Button
-                className="bg-[#7c3aed] text-white px-6 h-11 text-sm font-medium hover:bg-[#6d28d9] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                className="bg-black text-white px-6 h-9 text-sm font-medium hover:bg-gray-800 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors rounded-[4px]"
                 disabled={validCount === 0 || isCreating || isSaving}
                 onClick={async () => {
                   setIsCreating(true)

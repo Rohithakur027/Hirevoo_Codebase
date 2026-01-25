@@ -23,19 +23,9 @@ export type AttachedFile = {
 }
 
 export function AttachmentModal({ isOpen, onClose, onAttach }: AttachmentModalProps) {
-    const [activeTab, setActiveTab] = useState<"local" | "drive">("local")
     const [selectedFiles, setSelectedFiles] = useState<AttachedFile[]>([])
     const [isDragging, setIsDragging] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
-
-    // Mock Google Drive files
-    const driveFiles: AttachedFile[] = [
-        { id: "d1", name: "Project_Proposal.pdf", size: "2.4 MB", type: "pdf", source: "drive" },
-        { id: "d2", name: "Resume_2024.docx", size: "156 KB", type: "doc", source: "drive" },
-        { id: "d3", name: "Portfolio_Screenshots.zip", size: "15.2 MB", type: "zip", source: "drive" },
-        { id: "d4", name: "Cover_Letter.pdf", size: "89 KB", type: "pdf", source: "drive" },
-        { id: "d5", name: "References.docx", size: "45 KB", type: "doc", source: "drive" },
-    ]
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files
@@ -83,14 +73,7 @@ export function AttachmentModal({ isOpen, onClose, onAttach }: AttachmentModalPr
         }
     }
 
-    const toggleDriveFile = (file: AttachedFile) => {
-        const exists = selectedFiles.find((f) => f.id === file.id)
-        if (exists) {
-            setSelectedFiles((prev) => prev.filter((f) => f.id !== file.id))
-        } else {
-            setSelectedFiles((prev) => [...prev, file])
-        }
-    }
+
 
     const removeFile = (fileId: string) => {
         setSelectedFiles((prev) => prev.filter((f) => f.id !== fileId))
@@ -130,93 +113,35 @@ export function AttachmentModal({ isOpen, onClose, onAttach }: AttachmentModalPr
                     </Button>
                 </div>
 
-                <div className="flex border-b">
-                    <button
-                        onClick={() => setActiveTab("local")}
-                        className={cn(
-                            "flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center gap-2 border-b-2 transition-colors",
-                            activeTab === "local"
-                                ? "text-violet-600 border-violet-600 bg-violet-50/50"
-                                : "text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50",
-                        )}
-                    >
-                        <Monitor className="w-4 h-4" />
-                        My Computer
-                    </button>
-                    <button
-                        onClick={() => setActiveTab("drive")}
-                        className={cn(
-                            "flex-1 px-4 py-3 text-sm font-medium flex items-center justify-center gap-2 border-b-2 transition-colors",
-                            activeTab === "drive"
-                                ? "text-violet-600 border-violet-600 bg-violet-50/50"
-                                : "text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/50",
-                        )}
-                    >
-                        <Cloud className="w-4 h-4" />
-                        Google Drive
-                    </button>
-                </div>
-
                 <div className="p-5">
-                    {activeTab === "local" ? (
-                        <div
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                            onDrop={handleDrop}
-                            className={cn(
-                                "border-2 border-dashed rounded-xl p-8 text-center transition-all",
-                                isDragging ? "border-violet-500 bg-violet-50" : "border-muted-foreground/25 hover:border-violet-400",
-                            )}
+                    <div
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        className={cn(
+                            "border-2 border-dashed rounded-xl p-8 text-center transition-all",
+                            isDragging ? "border-black bg-gray-50" : "border-muted-foreground/25 hover:border-gray-400",
+                        )}
+                    >
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            onChange={handleFileSelect}
+                            className="hidden"
+                            accept="*/*"
+                        />
+                        <Upload className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+                        <p className="text-sm text-foreground font-medium mb-1">Drag and drop files here</p>
+                        <p className="text-xs text-muted-foreground mb-4">or</p>
+                        <Button
+                            variant="outline"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="border-gray-300 text-gray-700 hover:bg-gray-50"
                         >
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                multiple
-                                onChange={handleFileSelect}
-                                className="hidden"
-                                accept="*/*"
-                            />
-                            <Upload className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-                            <p className="text-sm text-foreground font-medium mb-1">Drag and drop files here</p>
-                            <p className="text-xs text-muted-foreground mb-4">or</p>
-                            <Button
-                                variant="outline"
-                                onClick={() => fileInputRef.current?.click()}
-                                className="border-violet-300 text-violet-600 hover:bg-violet-50"
-                            >
-                                Browse Files
-                            </Button>
-                        </div>
-                    ) : (
-                        <div className="space-y-2 max-h-[280px] overflow-y-auto">
-                            {driveFiles.map((file) => {
-                                const isSelected = selectedFiles.some((f) => f.id === file.id)
-                                return (
-                                    <button
-                                        key={file.id}
-                                        onClick={() => toggleDriveFile(file)}
-                                        className={cn(
-                                            "w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left",
-                                            isSelected
-                                                ? "border-violet-500 bg-violet-50"
-                                                : "border-muted hover:border-violet-300 hover:bg-muted/50",
-                                        )}
-                                    >
-                                        {getFileIcon(file.type)}
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
-                                            <p className="text-xs text-muted-foreground">{file.size}</p>
-                                        </div>
-                                        {isSelected && (
-                                            <div className="w-5 h-5 rounded-full bg-violet-600 flex items-center justify-center">
-                                                <Check className="w-3 h-3 text-white" />
-                                            </div>
-                                        )}
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    )}
+                            Browse Files
+                        </Button>
+                    </div>
                 </div>
 
                 {selectedFiles.length > 0 && (
@@ -245,7 +170,7 @@ export function AttachmentModal({ isOpen, onClose, onAttach }: AttachmentModalPr
                     <Button
                         onClick={handleAttach}
                         disabled={selectedFiles.length === 0}
-                        className="bg-violet-600 hover:bg-violet-700 text-white"
+                        className="bg-black hover:bg-gray-800 text-white rounded-[6px]"
                     >
                         Attach {selectedFiles.length > 0 && `(${selectedFiles.length})`}
                     </Button>

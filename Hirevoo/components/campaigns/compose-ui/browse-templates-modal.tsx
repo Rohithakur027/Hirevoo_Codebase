@@ -181,15 +181,15 @@ Cheers,
     },
 ]
 
-const categories = ["Referral", "Cold Outreach", "Follow-up", "Networking", "Estworking"]
+const categories = ["Referral", "Cold Outreach", "Follow-up", "Networking"]
 const tones = ["Professional", "Friendly", "Urgent"]
 const lengths = ["Short", "Medium", "Long"]
 
 export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedTemplates }: BrowseTemplatesModalProps) {
     const [searchQuery, setSearchQuery] = useState("")
-    const [selectedCategories, setSelectedCategories] = useState<string[]>([])
-    const [selectedTones, setSelectedTones] = useState<string[]>([])
-    const [selectedLengths, setSelectedLengths] = useState<string[]>([])
+    const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+    const [selectedTone, setSelectedTone] = useState<string | null>(null)
+    const [selectedLength, setSelectedLength] = useState<string | null>(null)
     const [activeTab, setActiveTab] = useState<"all" | "saved">("all")
     const [currentIndex, setCurrentIndex] = useState(0)
 
@@ -198,9 +198,9 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
             searchQuery === "" ||
             template.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
             template.body.toLowerCase().includes(searchQuery.toLowerCase())
-        const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(template.category)
-        const matchesTone = selectedTones.length === 0 || selectedTones.includes(template.tone)
-        const matchesLength = selectedLengths.length === 0 || selectedLengths.includes(template.length)
+        const matchesCategory = !selectedCategory || template.category === selectedCategory
+        const matchesTone = !selectedTone || template.tone === selectedTone
+        const matchesLength = !selectedLength || template.length === selectedLength
         return matchesSearch && matchesCategory && matchesTone && matchesLength
     })
 
@@ -235,11 +235,11 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
         }
     }
 
-    const toggleFilter = (value: string, selected: string[], setSelected: (values: string[]) => void) => {
-        if (selected.includes(value)) {
-            setSelected(selected.filter((v) => v !== value))
+    const toggleFilter = (value: string, selected: string | null, setSelected: (value: string | null) => void) => {
+        if (selected === value) {
+            setSelected(null)
         } else {
-            setSelected([...selected, value])
+            setSelected(value)
         }
         setCurrentIndex(0)
     }
@@ -253,7 +253,7 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent
                 showCloseButton={false}
-                className="max-w-[1400px] w-[98vw] p-0 gap-0 overflow-hidden bg-background border shadow-xl"
+                className="max-w-[1200px] sm:max-w-[1200px] w-[85vw] p-0 gap-0 overflow-hidden bg-background border shadow-xl"
             >
                 <div className="flex items-center justify-between px-6 py-4 border-b bg-background">
                     <h2 className="text-xl font-semibold text-foreground">Browse Templates</h2>
@@ -286,7 +286,7 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
                             className={cn(
                                 "text-sm font-medium pb-2 border-b-2 transition-colors",
                                 activeTab === "all"
-                                    ? "text-violet-600 border-violet-600"
+                                    ? "text-black border-black"
                                     : "text-muted-foreground border-transparent hover:text-foreground",
                             )}
                         >
@@ -297,13 +297,13 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
                             className={cn(
                                 "text-sm font-medium pb-2 border-b-2 transition-colors flex items-center gap-2",
                                 activeTab === "saved"
-                                    ? "text-violet-600 border-violet-600"
+                                    ? "text-black border-black"
                                     : "text-muted-foreground border-transparent hover:text-foreground",
                             )}
                         >
                             My Saved Templates
                             {savedTemplates.length > 0 && (
-                                <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full">
+                                <span className="text-xs bg-gray-100 text-black px-1.5 py-0.5 rounded-full">
                                     {savedTemplates.length}
                                 </span>
                             )}
@@ -322,9 +322,9 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
                                     {categories.map((category) => (
                                         <label key={category} className="flex items-center gap-2 cursor-pointer group">
                                             <Checkbox
-                                                checked={selectedCategories.includes(category)}
-                                                onCheckedChange={() => toggleFilter(category, selectedCategories, setSelectedCategories)}
-                                                className="border-muted-foreground/40 data-[state=checked]:bg-violet-600 data-[state=checked]:border-violet-600"
+                                                checked={selectedCategory === category}
+                                                onCheckedChange={() => toggleFilter(category, selectedCategory, setSelectedCategory)}
+                                                className="border-muted-foreground/40 data-[state=checked]:bg-black data-[state=checked]:border-black"
                                             />
                                             <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
                                                 {category}
@@ -341,9 +341,9 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
                                     {tones.map((tone) => (
                                         <label key={tone} className="flex items-center gap-2 cursor-pointer group">
                                             <Checkbox
-                                                checked={selectedTones.includes(tone)}
-                                                onCheckedChange={() => toggleFilter(tone, selectedTones, setSelectedTones)}
-                                                className="border-muted-foreground/40 data-[state=checked]:bg-violet-600 data-[state=checked]:border-violet-600"
+                                                checked={selectedTone === tone}
+                                                onCheckedChange={() => toggleFilter(tone, selectedTone, setSelectedTone)}
+                                                className="border-muted-foreground/40 data-[state=checked]:bg-black data-[state=checked]:border-black"
                                             />
                                             <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
                                                 {tone}
@@ -360,9 +360,9 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
                                     {lengths.map((length) => (
                                         <label key={length} className="flex items-center gap-2 cursor-pointer group">
                                             <Checkbox
-                                                checked={selectedLengths.includes(length)}
-                                                onCheckedChange={() => toggleFilter(length, selectedLengths, setSelectedLengths)}
-                                                className="border-muted-foreground/40 data-[state=checked]:bg-violet-600 data-[state=checked]:border-violet-600"
+                                                checked={selectedLength === length}
+                                                onCheckedChange={() => toggleFilter(length, selectedLength, setSelectedLength)}
+                                                className="border-muted-foreground/40 data-[state=checked]:bg-black data-[state=checked]:border-black"
                                             />
                                             <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
                                                 {length}
@@ -418,11 +418,12 @@ export function BrowseTemplatesModal({ isOpen, onClose, onSelectTemplate, savedT
                                 </div>
 
                                 <Button
+                                    size="sm"
                                     onClick={handleUseTemplate}
-                                    className="mt-4 w-full h-11 bg-violet-600 hover:bg-violet-700 text-white text-base font-medium rounded-lg flex items-center justify-center gap-2 shrink-0"
+                                    className="mt-4 px-6 h-9 bg-black hover:bg-gray-800 text-white text-sm font-medium rounded-[6px] flex items-center justify-center gap-2 shrink-0 self-end"
                                 >
                                     Use This Template
-                                    <ChevronRight className="w-5 h-5" />
+                                    <ChevronRight className="w-4 h-4" />
                                 </Button>
                             </>
                         ) : (

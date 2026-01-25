@@ -24,8 +24,9 @@ export function RecipientTable({ recipients: initialRecipients }: RecipientTable
     const [showBulkFollowup, setShowBulkFollowup] = useState(false)
 
     const handleFollowUp = (recipient: Recipient) => {
-        setFollowUpRecipient(recipient)
-        setShowFollowUpDialog(true)
+        // As per user request, this now opens the chat modal same as "View"
+        setChatRecipient(recipient)
+        setShowChatDialog(true)
     }
 
     const handleViewChat = (recipient: Recipient) => {
@@ -53,6 +54,18 @@ export function RecipientTable({ recipients: initialRecipients }: RecipientTable
                         Sent
                     </Badge>
                 )
+            case "Pending":
+                return (
+                    <Badge className="bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs px-3 py-1 h-auto shadow-none border border-gray-200 font-medium">
+                        Pending
+                    </Badge>
+                )
+            default:
+                return (
+                    <Badge className="bg-gray-50 text-gray-400 hover:bg-gray-100 text-xs px-3 py-1 h-auto shadow-none border border-gray-200 font-medium">
+                        {status}
+                    </Badge>
+                )
         }
     }
 
@@ -74,7 +87,7 @@ export function RecipientTable({ recipients: initialRecipients }: RecipientTable
                             </span>
                         </div>
                         <Button
-                            className="h-9 text-sm gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-medium shadow-sm"
+                            className="h-9 text-sm gap-2 bg-black hover:bg-gray-800 text-white font-medium shadow-sm rounded-[6px]"
                             onClick={() => setShowBulkFollowup(true)}
                         >
                             <Zap className="h-4 w-4" />
@@ -86,19 +99,19 @@ export function RecipientTable({ recipients: initialRecipients }: RecipientTable
                     <table className="w-full">
                         <thead className="sticky top-0 bg-white z-10">
                             <tr className="border-b border-slate-200">
-                                <th className="pb-3 w-[35%] pl-5 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <th className="pb-3 w-[36%] pl-5 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Contact
                                 </th>
-                                <th className="pb-3 w-[60px] text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <th className="pb-3 w-[16%] text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     View
                                 </th>
-                                <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <th className="pb-3 w-[16%] text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Date
                                 </th>
-                                <th className="pb-3 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <th className="pb-3 w-[16%] text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Status
                                 </th>
-                                <th className="pb-3 pr-5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <th className="pb-3 w-[16%] pr-5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Actions
                                 </th>
                             </tr>
@@ -108,10 +121,7 @@ export function RecipientTable({ recipients: initialRecipients }: RecipientTable
                                 <tr key={recipient.id} className="group hover:bg-slate-50 transition-colors">
                                     <td className="py-4 pl-5">
                                         <div className="flex flex-col">
-                                            <p className="text-sm font-medium text-foreground">
-                                                {recipient.name}
-                                            </p>
-                                            <p className="text-xs text-[#4553f4]">
+                                            <p className="text-sm font-medium text-foreground truncate max-w-[400px]" title={recipient.email}>
                                                 {recipient.email}
                                             </p>
                                         </div>

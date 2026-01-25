@@ -1,5 +1,6 @@
 import { google, gmail_v1 } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
+import { decrypt } from "@/lib/encryption";
 
 // Supabase client for token management
 const supabaseAdmin = createClient(
@@ -112,18 +113,38 @@ export class GmailClient {
     async getUserTokens(userId: string): Promise<TokenInfo | null> {
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('gmail_access_token, gmail_refresh_token, gmail_token_expires_at')
+            .select('gmail_access_token, gmail_refresh_token, gmail_refresh_token_salt, gmail_refresh_token_content, gmail_refresh_token_tag, gmail_token_expires_at')
             .eq('id', userId)
             .single();
 
-        if (error || !user?.gmail_access_token || !user?.gmail_refresh_token) {
+        if (error || !user?.gmail_access_token) {
             console.error('[GmailClient] Failed to fetch tokens:', error);
+            return null;
+        }
+
+        let refreshToken = user.gmail_refresh_token;
+
+        // Try decrypting if we have the new columns
+        if (user.gmail_refresh_token_content && user.gmail_refresh_token_salt && user.gmail_refresh_token_tag) {
+            try {
+                refreshToken = decrypt({
+                    salt: user.gmail_refresh_token_salt,
+                    content: user.gmail_refresh_token_content,
+                    tag: user.gmail_refresh_token_tag
+                });
+            } catch (e) {
+                console.error('[GmailClient] Failed to decrypt token:', e);
+                // Fallback to legacy plain text if decryption fails but old token exists
+                if (!refreshToken) return null;
+            }
+        } else if (!refreshToken) {
+            // No legacy token and no encrypted token
             return null;
         }
 
         return {
             accessToken: user.gmail_access_token,
-            refreshToken: user.gmail_refresh_token,
+            refreshToken: refreshToken,
             expiresAt: new Date(user.gmail_token_expires_at),
         };
     }

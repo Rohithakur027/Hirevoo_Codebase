@@ -150,12 +150,12 @@ export function ComposeReviewPage() {
             avatar: c.name.split(' ').map(n => n[0]).join('').toUpperCase(),
             avatarColor: avatarColorsRef.current.get(c.id)!,
             status: c.emailStatus === 'done' ? 'ready' as const :
-                   c.emailStatus === 'draft' ? 'draft' as const : 'pending' as const
+                c.emailStatus === 'draft' ? 'draft' as const : 'pending' as const
         }
     })
 
     // Don't use local state for contacts - use campaign context
-    const setContacts = () => {} // Not needed since we use campaign context
+    const setContacts = () => { } // Not needed since we use campaign context
 
     const filteredContacts = contacts.filter(
         (contact) =>
@@ -312,7 +312,7 @@ export function ComposeReviewPage() {
                 onSave={handleSaveTemplate}
             />
 
-            <Toaster position="bottom-left" richColors />
+            <Toaster position="bottom-right" richColors />
         </div>
     )
 }

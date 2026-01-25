@@ -12,25 +12,25 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import type { Recipient } from "@/lib/data"
 import { useState } from "react"
-import { Send, Users } from "lucide-react"
+import { Send } from "lucide-react"
 
-interface BulkFollowupDialogProps {
-    recipients: Recipient[]
+interface IndividualFollowupDialogProps {
+    recipient: Recipient | null
     open: boolean
     onOpenChange: (open: boolean) => void
 }
 
-export function BulkFollowupDialog({ recipients, open, onOpenChange }: BulkFollowupDialogProps) {
+export function IndividualFollowupDialog({ recipient, open, onOpenChange }: IndividualFollowupDialogProps) {
     const [message, setMessage] = useState("")
 
-    // Filter recipients who need followup (e.g. status is Opened or Sent, but not Replied)
-    const eligibleRecipients = recipients.filter(r => r.status === "Sent" || r.status === "Opened")
+    if (!recipient) return null
 
     const handleSend = () => {
-        // Logic to send bulk followup
-        console.log("Sending bulk followup to", eligibleRecipients.length, "recipients", message)
+        // Logic to send followup would go here
+        console.log("Sending followup to", recipient.email, message)
         setMessage("")
         onOpenChange(false)
     }
@@ -40,43 +40,47 @@ export function BulkFollowupDialog({ recipients, open, onOpenChange }: BulkFollo
             <DialogContent className="sm:max-w-[500px]">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <Users className="h-5 w-5 text-emerald-500" />
-                        <span>Bulk Follow-up</span>
+                        <span>Follow up with {recipient.name}</span>
                     </DialogTitle>
                     <DialogDescription>
-                        Send a follow-up to {eligibleRecipients.length} recipients who haven't replied yet.
+                        Send a quick follow-up email to keep the conversation going.
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="grid gap-4 py-4">
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
-                        You are about to email <strong>{eligibleRecipients.length}</strong> contacts.
-                        Expected delivery time: Immediate.
+                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-md border">
+                        <Avatar className="h-8 w-8">
+                            <AvatarImage src={recipient.avatar} />
+                            <AvatarFallback>{recipient.initials}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1">
+                            <div className="text-sm font-medium">{recipient.name}</div>
+                            <div className="text-xs text-muted-foreground">{recipient.email}</div>
+                        </div>
                     </div>
 
                     <div className="grid gap-2">
                         <Label htmlFor="subject">Subject</Label>
-                        <Input id="subject" defaultValue="Follow up on our previous email" />
+                        <Input id="subject" defaultValue={`Re: Previous conversation`} />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="message">Message Template</Label>
+                        <Label htmlFor="message">Message</Label>
                         <Textarea
                             id="message"
-                            placeholder="Hi {{name}}, just wanted to bump this to the top of your inbox..."
+                            placeholder="Type your follow-up message here..."
                             className="h-[150px]"
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
                         />
-                        <p className="text-xs text-muted-foreground">You can use {"{{name}}"} variable in your message.</p>
                     </div>
                 </div>
 
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-                    <Button onClick={handleSend} disabled={eligibleRecipients.length === 0} className="bg-emerald-500 hover:bg-emerald-600 text-white">
+                    <Button onClick={handleSend} className="bg-emerald-500 hover:bg-emerald-600 text-white">
                         <Send className="w-4 h-4 mr-2" />
-                        Send to {eligibleRecipients.length} Recipients
+                        Send Email
                     </Button>
                 </DialogFooter>
             </DialogContent>

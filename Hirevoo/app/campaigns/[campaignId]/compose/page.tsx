@@ -8,10 +8,7 @@ export default function ComposePage() {
   return (
     <SidebarProvider>
       <div className="h-screen bg-background flex overflow-hidden">
-        {/* Sidebar - Always visible on desktop, can be collapsed */}
-        <div className="hidden lg:block">
-          <SideBar />
-        </div>
+
 
         {/* Main Content - Full screen for ComposeReviewPage */}
         <div className="flex-1 h-full">

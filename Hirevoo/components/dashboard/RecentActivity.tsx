@@ -4,41 +4,14 @@ import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Plus, Sparkles, BookOpen, Laptop, Loader2 } from "lucide-react"
+import { Plus, Sparkles, BookOpen, Laptop, Loader2, Mail } from "lucide-react"
 import { toast } from "sonner" // Optional: Assuming you use sonner or similar for toasts
 import ConnectGmailModal from "./ConnectGmailModal"
 
 // Define the permission levels locally to avoid import issues
 type PermissionLevel = 'SEND_ONLY' | 'FULL_ACCESS';
 
-interface Reply {
-    id: string
-    user: {
-        name: string
-        initials: string
-    }
-    subject: string
-    preview: string
-    time: string
-}
 
-const recentReplies: Reply[] = [
-    {
-        id: "1",
-        user: { name: "Sarah Johnson", initials: "SJ" },
-        subject: "Re: Interview Opportunity",
-        preview: "Thank you for reaching out! I would love to schedule a call to discuss...",
-        time: "2m ago",
-    },
-    {
-        id: "2",
-        user: { name: "Michael Chen", initials: "MC" },
-        subject: "Re: Partnership Proposal",
-        preview: "This sounds interesting. Can you share more details about the...",
-        time: "15m ago",
-    },
-    // ... kept your other data points ...
-]
 
 export function RecentActivity() {
     const router = useRouter()
@@ -115,13 +88,15 @@ export function RecentActivity() {
     return (
         <div className="flex flex-col h-full gap-4">
             {/* Connect Gmail Card */}
-            <div className="rounded-xl p-5 text-white relative overflow-hidden h-[160px] flex-shrink-0 flex flex-col justify-between" style={{ backgroundColor: "#209ba0" }}>
+            <div className="rounded-[16px] p-5 text-white relative overflow-hidden h-[200px] flex-shrink-0 flex flex-col justify-between" style={{ backgroundColor: "#209ba0" }}>
                 <div className="absolute -right-4 -top-4 w-20 h-20 bg-white/10 rounded-full" />
                 <div className="absolute -right-6 top-6 w-14 h-14 bg-white/10 rounded-full" />
 
                 {/* Decorative Icons */}
-                <BookOpen className="absolute right-8 top-8 w-6 h-6 text-white/20 rotate-12" />
-                <Laptop className="absolute right-8 bottom-12 w-8 h-8 text-white/20 -rotate-6" />
+                <BookOpen className="absolute right-4 top-12 w-8 h-8 text-white/20 rotate-12" />
+                <Laptop className="absolute right-6 bottom-16 w-10 h-10 text-white/20 -rotate-6" />
+                <div className="absolute right-3 bottom-8 w-3 h-3 rounded-full border border-white/30" />
+                <div className="absolute right-12 top-6 w-2 h-2 rounded-full bg-white/30" />
 
                 {/* Dynamic UI based on state */}
                 {isLoading ? (
@@ -132,13 +107,17 @@ export function RecentActivity() {
                     // STATE: CONNECTED (Show Upgrade option)
                     <>
                         <div>
-                            <h3 className="text-sm font-semibold mb-1">Upgrade to Pro</h3>
-                            <p className="text-xs opacity-90 leading-relaxed">
-                                Get unlimited campaigns, AI features, and more.
+                            <h3 className="text-base font-semibold mb-2">Upgrade to Pro</h3>
+                            <div className="mb-2">
+                                <span className="text-3xl font-bold">₹199</span>
+                                <span className="text-xs opacity-90 ml-1">/ Month</span>
+                            </div>
+                            <p className="text-[10px] opacity-80 mb-4">
+                                ₹1999 Billed Annually
                             </p>
                         </div>
                         <Button
-                            className="text-xs font-medium px-4 py-1.5 rounded-md w-fit text-black hover:opacity-90 h-8 mt-2"
+                            className="text-xs font-semibold px-6 py-1 rounded-[6px] w-fit text-black hover:opacity-90 h-8 mt-auto shadow-sm"
                             style={{ backgroundColor: "#c9f763" }}
                             onClick={() => router.push("/settings/billing")} // Example action
                         >
@@ -155,7 +134,7 @@ export function RecentActivity() {
                             </p>
                         </div>
                         <Button
-                            className="text-xs font-medium px-4 py-1.5 rounded-md w-fit text-black hover:opacity-90 h-8 mt-2 disabled:opacity-70"
+                            className="text-xs font-medium px-4 py-1 rounded-none w-fit text-black hover:opacity-90 h-7 mt-2 disabled:opacity-70"
                             style={{ backgroundColor: "#c9f763" }}
                             onClick={handleConnectClick}
                             disabled={isConnecting}
@@ -173,52 +152,17 @@ export function RecentActivity() {
                 )}
             </div>
 
-            {/* Create Campaign Card */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex-shrink-0">
-                <div className="flex items-center gap-2 mb-2">
-                    <Sparkles className="w-4 h-4 text-emerald-500" />
-                    <h3 className="text-sm font-semibold text-gray-800">Create Campaign</h3>
-                </div>
-                <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-                    Do your daily task to send emails — you&apos;re just one step away from your dream job.
-                </p>
-                <Button
-                    className="w-full text-xs font-medium rounded-md text-white bg-black hover:bg-gray-800 h-9"
-                    onClick={() => router.push('/campaigns/upload')}
-                >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    Create New Campaign
-                </Button>
-            </div>
-
             {/* Recent Replies */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
                     <h3 className="text-sm font-semibold text-gray-800">Recent Replies</h3>
                 </div>
                 <div className="flex-1 overflow-y-auto overscroll-contain p-2">
-                    <div className="space-y-1">
-                        {recentReplies.map((reply) => (
-                            <button
-                                key={reply.id}
-                                className="w-full flex items-start gap-2.5 p-2.5 rounded-xl hover:bg-amber-50 transition-colors text-left"
-                                style={{ backgroundColor: "rgba(254, 243, 199, 0.4)" }}
-                            >
-                                <Avatar className="w-8 h-8 flex-shrink-0">
-                                    <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xs font-medium">
-                                        {reply.user.initials}
-                                    </AvatarFallback>
-                                </Avatar>
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <p className="text-xs font-semibold text-gray-800 truncate">{reply.user.name}</p>
-                                        <span className="text-xs text-gray-400 flex-shrink-0">{reply.time}</span>
-                                    </div>
-                                    <p className="text-xs text-gray-600 truncate mt-0.5">{reply.subject}</p>
-                                    <p className="text-xs text-gray-400 truncate mt-0.5">{reply.preview}</p>
-                                </div>
-                            </button>
-                        ))}
+                    <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
+                        <div className="bg-gray-50 p-3 rounded-full mb-2">
+                            <Mail className="w-6 h-6 text-gray-300" />
+                        </div>
+                        <p className="text-xs font-medium">No Recent Replies</p>
                     </div>
                 </div>
             </div>

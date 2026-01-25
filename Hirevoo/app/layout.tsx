@@ -24,12 +24,12 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
 
-      <Providers>
-        <CampaignProvider>
-         
+        <Providers>
+          <CampaignProvider>
+
             {children}
-          
-        </CampaignProvider>
+
+          </CampaignProvider>
         </Providers>
       </body>
     </html>

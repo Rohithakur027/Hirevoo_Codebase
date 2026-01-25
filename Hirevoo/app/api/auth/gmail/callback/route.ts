@@ -3,11 +3,12 @@ import { gmailClient } from '@/lib/gmail/client';
 import { createClient } from '@supabase/supabase-js';
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { encrypt } from "@/lib/encryption";
 
 // Create a Supabase client with service role key for admin operations
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 export async function GET(request: NextRequest) {
@@ -65,24 +66,55 @@ export async function GET(request: NextRequest) {
             : null;
 
         console.log('[Gmail Callback] Updating user in database...', {
-            userEmail,
+            userEmail: session.user.email,
+            userId: (session.user as any).id,
             permissionLevel,
-            hasAccessToken: !!tokens.access_token,
-            hasRefreshToken: !!tokens.refresh_token,
-            expiresAt
+            hasAccessToken: !!tokens.access_token
         });
 
-        const { error: updateError } = await supabase
-            .from('users')
-            .update({
-                gmail_connected: true,
-                gmail_access_token: tokens.access_token,
-                gmail_refresh_token: tokens.refresh_token,
-                gmail_token_expires_at: expiresAt,
-                gmail_permission_level: permissionLevel,
-                updated_at: new Date().toISOString(),
-            })
-            .eq('email', userEmail);
+        // Encrypt refresh token if present
+        let encryptedToken: { salt: string | null, content: string | null, tag: string | null } = { salt: null, content: null, tag: null };
+        if (tokens.refresh_token) {
+            const { salt, content, tag } = encrypt(tokens.refresh_token);
+            encryptedToken = { salt, content, tag };
+        }
+
+        // Prepare update data
+        const updateData: any = { // Use any to bypass strict type checking for new columns
+            gmail_connected: true,
+            gmail_access_token: tokens.access_token,
+            gmail_token_expires_at: expiresAt,
+            gmail_permission_level: permissionLevel,
+            updated_at: new Date().toISOString(),
+        };
+
+        // Only update refresh token if we received a new one (Google doesn't always send it)
+        if (tokens.refresh_token) {
+            updateData.gmail_refresh_token_salt = encryptedToken.salt;
+            updateData.gmail_refresh_token_content = encryptedToken.content;
+            updateData.gmail_refresh_token_tag = encryptedToken.tag;
+            // Clear old column if it exists/is allocated
+            updateData.gmail_refresh_token = null;
+        }
+
+        let updateError;
+
+        // Try to update by ID first if available (most reliable)
+        if ((session.user as any).id) {
+            const { error } = await supabase
+                .from('users')
+                .update(updateData)
+                .eq('id', (session.user as any).id);
+            updateError = error;
+        } else {
+            // Fallback to email
+            console.log('[Gmail Callback] No user ID in session, falling back to email update');
+            const { error } = await supabase
+                .from('users')
+                .update(updateData)
+                .eq('email', userEmail);
+            updateError = error;
+        }
 
         if (updateError) {
             console.error('[Gmail Callback] Database update error:', updateError);

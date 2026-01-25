@@ -63,7 +63,7 @@ export function SaveTemplateModal({ isOpen, onClose, onSave }: SaveTemplateModal
                     <Button
                         onClick={handleSave}
                         disabled={!templateName.trim()}
-                        className="bg-violet-600 hover:bg-violet-700 text-white"
+                        className="bg-black hover:bg-gray-800 text-white rounded-[6px]"
                     >
                         Save Template
                     </Button>

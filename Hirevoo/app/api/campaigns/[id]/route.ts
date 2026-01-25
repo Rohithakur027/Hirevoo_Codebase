@@ -117,7 +117,15 @@ export async function GET(
     // 5. Get campaign contacts
     const { data: contacts, error: contactsError } = await supabase
       .from('campaign_contacts')
-      .select('*')
+      .select(`
+        *,
+        contacts (
+          name,
+          email,
+          company,
+          role
+        )
+      `)
       .eq('campaign_id', campaignId)
       .order('created_at', { ascending: true });
 
@@ -128,10 +136,10 @@ export async function GET(
     // 6. Format response
     const formattedContacts = (contacts || []).map((c: any) => ({
       id: c.contact_id || c.id,
-      name: c.recipient_name || '',
-      email: c.recipient_email,
-      company: c.company || undefined,
-      role: c.role || undefined,
+      name: c.contacts?.name || '',
+      email: c.contacts?.email || '',
+      company: c.contacts?.company || undefined,
+      role: c.contacts?.role || undefined,
       emailStatus: c.status === 'sent' ? 'done' : c.status === 'pending' ? 'draft' : 'draft',
       emailSubject: c.email_subject || '',
       emailBody: c.email_body || '',

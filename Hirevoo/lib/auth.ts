@@ -12,9 +12,6 @@ const supabaseAdmin = createClient(
 async function saveUserToSupabase(user: any, account: any) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  const tokenExpiresAt = account.expires_at
-    ? new Date(account.expires_at * 1000).toISOString()
-    : null;
 
   console.log('[saveUserToSupabase] Saving user:', { email: user.email, name: user.name });
 
@@ -23,10 +20,8 @@ async function saveUserToSupabase(user: any, account: any) {
       email: user.email,
       name: user.name,
       plan: 'free',
-      gmail_connected: true,
-      gmail_access_token: account.access_token,
-      gmail_refresh_token: account.refresh_token,
-      gmail_token_expires_at: tokenExpiresAt,
+      // Don't overwrite Gmail tokens on regular sign-in
+      // These are handled separately via the Gmail connection flow
       updated_at: new Date().toISOString(),
     };
 
