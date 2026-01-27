@@ -47,3 +47,8 @@ next-env.d.ts
 # Temporary files
 *.tmp
 *.temp
+
+# Local/Private documentation and settings
+.claude/
+GMAIL_WEBHOOK_IMPLEMENTATION.md
+emailfeature.md
