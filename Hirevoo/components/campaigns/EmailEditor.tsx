@@ -26,7 +26,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { CampaignContact } from "@/types"
-import { AIAssistantModal } from "./AIAssistantModal"
+import { AIAssistantModal } from "./compose-ui/ai-assistant-modal"
 
 interface EmailEditorProps {
   contact: CampaignContact | null
@@ -264,9 +264,7 @@ export function EmailEditor({
       <AIAssistantModal
         isOpen={isAIModalOpen}
         onClose={() => setIsAIModalOpen(false)}
-        onGenerateEmail={onGenerateEmail}
-        onCopyToEditor={handleCopyToEditorFromAI}
-        isLoading={isGeneratingEmail}
+        onInsertText={handleCopyToEditorFromAI}
       />
 
     </Card>
