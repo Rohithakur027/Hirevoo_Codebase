@@ -14,13 +14,13 @@ export function extractSheetInfo(url: string): { sheetId: string; gid?: string }
 
   return {
     sheetId: match[1],
-    gid: match[2] || '0' // Default to first sheet (gid=0)
+    gid: match[2] || '0' // Default to first sheet
   };
 }
 
 /**
- * Fetch contacts from public Google Sheets
- * Uses the CSV export endpoint that doesn't require authentication
+ * Fetch contacts from public Google Sheets.
+ * Uses public CSV export endpoint (no auth required).
  */
 export async function fetchContactsFromSheet(sheetUrl: string): Promise<GoogleSheetsContact[]> {
   try {
@@ -31,7 +31,7 @@ export async function fetchContactsFromSheet(sheetUrl: string): Promise<GoogleSh
 
     const { sheetId, gid } = sheetInfo;
 
-    // Use Google's CSV export endpoint for public sheets
+    // Use Google CSV export endpoint
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
 
     console.log(`Fetching from public sheet: ${csvUrl}`);
@@ -48,9 +48,9 @@ export async function fetchContactsFromSheet(sheetUrl: string): Promise<GoogleSh
       throw new Error('The Google Sheet appears to be empty or not publicly accessible');
     }
 
-    // Parse CSV using Papa Parse (imported in the component)
+    // Parse CSV. (Note: Full parsing done in component with Papa Parse)
     return new Promise((resolve, reject) => {
-      // We'll use Papa Parse in the component, but here we do basic parsing
+      // Basic validation parsing
       const lines = csvText.trim().split('\n');
       if (lines.length < 2) {
         reject(new Error('Sheet must have a header row and at least one data row'));
@@ -84,7 +84,7 @@ export async function fetchContactsFromSheet(sheetUrl: string): Promise<GoogleSh
         const line = lines[i].trim();
         if (!line) continue;
 
-        // Simple CSV parsing (handles quoted values with commas)
+        // Simple CSV parsing (handles quoted values)
         const values: string[] = [];
         let current = '';
         let inQuotes = false;

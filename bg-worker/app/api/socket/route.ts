@@ -1,13 +1,6 @@
 /**
- * app/api/socket/route.ts
- *
- * Purpose: Initialize Socket.IO server for real-time campaign progress updates
- *
- * This API route initializes the Socket.IO server that handles real-time
- * communication between the bg-worker and frontend clients.
- *
- * In Next.js App Router, we can't directly access the HTTP server, so we use
- * the response socket to attach Socket.IO.
+ * Initialize Socket.IO server for real-time campaign progress updates.
+ * Initializes server if not already running.
  */
 
 import { NextRequest } from 'next/server';
@@ -17,8 +10,7 @@ import { getOrCreateSocketServer } from '@/lib/socket/server';
 // It's called once when the server starts
 export async function GET(request: NextRequest) {
   try {
-    // We can't directly access the HTTP server in App Router,
-    // but we can initialize Socket.IO when this route is first called
+    // Initialize Socket.IO on first call via workaround
     console.log('[Socket.IO] Initializing Socket.IO server...');
 
     // Try to initialize Socket.IO server

@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { createClient } from '@supabase/supabase-js';
 import { authOptions } from '@/lib/auth';
+import { getUTCTimeISO } from '@/lib/date-helpers';
 
 // ============================================================
 // DATABASE CLIENT
@@ -144,7 +145,7 @@ export async function POST(
       .update({
         status: 'ready',
         sent_at: null,
-        updated_at: new Date().toISOString(),
+        updated_at: getUTCTimeISO(),
       })
       .eq('id', campaignId);
 
@@ -314,8 +315,8 @@ export async function GET(
 
     // 5. Determine if campaign can/should be reset
     const canReset = ['sending', 'sent', 'failed', 'ready'].includes(campaign.status);
-    const isStuck = campaign.status === 'sending' && 
-      campaign.updated_at && 
+    const isStuck = campaign.status === 'sending' &&
+      campaign.updated_at &&
       (Date.now() - new Date(campaign.updated_at).getTime() > 10 * 60 * 1000); // 10 minutes
 
     return NextResponse.json({

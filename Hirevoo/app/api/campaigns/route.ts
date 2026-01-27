@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { authOptions } from '@/lib/auth';
+import { getUTCTimeISO } from '@/lib/date-helpers';
 
 // ============================================================
 // TYPE DEFINITIONS
@@ -101,8 +102,8 @@ export async function POST(request: NextRequest) {
         user_id: user.id,
         name: body.name,
         status: 'composing',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        created_at: getUTCTimeISO(),
+        updated_at: getUTCTimeISO(),
       })
       .select('id, name, status, created_at, updated_at')
       .single();
@@ -127,7 +128,7 @@ export async function POST(request: NextRequest) {
       name: contact.name,
       company: contact.company || null,
       role: contact.role || null,
-      updated_at: new Date().toISOString(),
+      updated_at: getUTCTimeISO(),
     }));
 
     // Upsert contacts (insert or update on conflict)
@@ -166,18 +167,11 @@ export async function POST(request: NextRequest) {
       return {
         campaign_id: campaign.id,
         contact_id: dbContactId,
-        email_subject: contact.emailSubject || 'Introduction - Software Developer',
-        email_body: contact.emailBody || `Hi ${contact.name || 'there'},
-
-I came across your profile and I'm interested in connecting with you. I noticed your background in ${contact.role || 'your field'} and thought we might have some common interests.
-
-I'd love to learn more about your experience and potentially explore opportunities to work together.
-
-Best regards,
-[Your Name]`,
+        email_subject: contact.emailSubject || '',
+        email_body: contact.emailBody || '',
         status: 'pending',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        created_at: getUTCTimeISO(),
+        updated_at: getUTCTimeISO(),
       };
     });
 
@@ -198,6 +192,12 @@ Best regards,
 
     console.log(`[API:campaigns] Added ${campaignContactsToInsert.length} contacts to campaign`);
 
+    // Build contact ID mapping: email → database contact ID
+    const contactIdMap: Record<string, string> = {};
+    for (const [email, id] of contactEmailToIdMap.entries()) {
+      contactIdMap[email] = id;
+    }
+
     // 6. Return success with campaign data
     return NextResponse.json({
       success: true,
@@ -208,6 +208,7 @@ Best regards,
         contactCount: upsertedContacts?.length || 0,
         createdAt: campaign.created_at,
         updatedAt: campaign.updated_at,
+        contactIdMap,
       },
     });
   } catch (error) {

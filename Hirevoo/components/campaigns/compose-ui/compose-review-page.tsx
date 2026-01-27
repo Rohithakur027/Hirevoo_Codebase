@@ -21,57 +21,6 @@ export type Contact = {
     status: "ready" | "draft" | "pending"
 }
 
-const initialContacts: Contact[] = [
-    {
-        id: "1",
-        name: "Aeley Shon",
-        email: "hirevoorca@gmail.com",
-        avatar: "AS",
-        avatarColor: "bg-indigo-500",
-        status: "draft",
-    },
-    {
-        id: "2",
-        name: "Robers Report",
-        email: "hirevoomt@gmail.com",
-        avatar: "RR",
-        avatarColor: "bg-rose-400",
-        status: "draft",
-    },
-    {
-        id: "3",
-        name: "Jimme Horrin",
-        email: "hirevoomp@gmail.com",
-        avatar: "JH",
-        avatarColor: "bg-amber-500",
-        status: "draft",
-    },
-    {
-        id: "4",
-        name: "Ruolan Smith",
-        email: "hirevoomit@gmail.com",
-        avatar: "RS",
-        avatarColor: "bg-teal-500",
-        status: "draft",
-    },
-    {
-        id: "5",
-        name: "Haney Mucklan",
-        email: "hirevoomn@gmail.com",
-        avatar: "HM",
-        avatarColor: "bg-slate-500",
-        status: "draft",
-    },
-    {
-        id: "6",
-        name: "Latern Hangerason",
-        email: "hirevoorcc@gmail.com",
-        avatar: "LH",
-        avatarColor: "bg-emerald-500",
-        status: "draft",
-    },
-]
-
 export type SavedTemplate = {
     id: string
     name: string
@@ -104,24 +53,64 @@ export function ComposeReviewPage() {
     const [isLoading, setIsLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState("")
     const [subject, setSubject] = useState("")
-    const [emailBody, setEmailBody] = useState("Hi {FirstName},\n\nI hope this email finds you well...")
+    const [emailBody, setEmailBody] = useState("")
     const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false)
     const [isAIModalOpen, setIsAIModalOpen] = useState(false)
     const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
     const [useTemplateForAll, setUseTemplateForAll] = useState(false)
     const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([])
+    // Track which contact's data is currently loaded in the editor
+    const loadedContactIdRef = useRef<string | null>(null)
 
     useEffect(() => {
         const timer = setTimeout(() => setIsLoading(false), 2000)
         return () => clearTimeout(timer)
     }, [])
 
+    // Helper: get the first name from a full name
+    const getFirstName = useCallback((fullName: string) => {
+        return fullName?.split(' ')[0] || 'there'
+    }, [])
+
+    // Helper: get default email body for a contact with their real name
+    const getDefaultEmailBody = useCallback((contactName: string) => {
+        const firstName = getFirstName(contactName)
+        return `Hi ${firstName},\n\nI hope this email finds you well...`
+    }, [getFirstName])
+
+    // Sync subject/body when the selected contact changes
+    // This loads the contact's saved email or creates a personalized default
+    useEffect(() => {
+        if (!campaign || !campaign.contacts || campaign.contacts.length === 0) return
+
+        // Determine which contact is actually selected
+        const effectiveContactId = currentContactId || campaign.contacts[0]?.id
+        if (!effectiveContactId) return
+
+        // Skip if we've already loaded this contact's data
+        if (loadedContactIdRef.current === effectiveContactId) return
+
+        const campaignContact = campaign.contacts.find(c => c.id === effectiveContactId)
+        if (!campaignContact) return
+
+        // Load the contact's saved email content, or create personalized defaults
+        loadedContactIdRef.current = effectiveContactId
+        setSubject(campaignContact.emailSubject || '')
+        setEmailBody(campaignContact.emailBody || getDefaultEmailBody(campaignContact.name))
+    }, [currentContactId, campaign, getDefaultEmailBody])
+
     // Move useCallback BEFORE any conditional returns to satisfy Rules of Hooks
     const handleSelectContact = useCallback(
         (contact: Contact) => {
+            // Save current contact's email before switching
+            if (campaign && loadedContactIdRef.current) {
+                updateContactEmail(loadedContactIdRef.current, subject, emailBody)
+            }
+            // Reset loaded ref so the effect above will load the new contact's data
+            loadedContactIdRef.current = null
             setCurrentContactId(contact.id)
         },
-        [setCurrentContactId],
+        [setCurrentContactId, campaign, updateContactEmail, subject, emailBody],
     )
 
     // Show loading while waiting for campaign
@@ -154,9 +143,6 @@ export function ComposeReviewPage() {
         }
     })
 
-    // Don't use local state for contacts - use campaign context
-    const setContacts = () => { } // Not needed since we use campaign context
-
     const filteredContacts = contacts.filter(
         (contact) =>
             contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -183,8 +169,13 @@ export function ComposeReviewPage() {
 
     const handlePrevious = () => {
         if (selectedContactIndex > 0) {
+            // Save current contact's email before navigating
+            if (selectedContact) {
+                updateContactEmail(selectedContact.id, subject, emailBody)
+            }
             const prevContact = filteredContacts[selectedContactIndex - 1]
             if (prevContact) {
+                loadedContactIdRef.current = null
                 setCurrentContactId(prevContact.id)
             }
         }
@@ -207,10 +198,17 @@ export function ComposeReviewPage() {
                 description: "Saving to database and redirecting...",
             })
 
-            // Save all contacts to database before navigating to send page
-            // Small delay to ensure state is updated
+            // Save all contacts to database, passing the current contact's
+            // unsaved subject/body to avoid the React state race condition
+            const pendingUpdate = {
+                contactId: selectedContact.id,
+                subject,
+                body: emailBody,
+            }
+
+            // Small delay to let the campaign ID update from temp to real
             setTimeout(async () => {
-                const saved = await saveContactsToDatabase()
+                const saved = await saveContactsToDatabase(pendingUpdate)
                 if (saved) {
                     // Use the actual campaign ID (which may have been updated from temp ID)
                     const actualCampaignId = campaign?.id || campaignId
@@ -225,11 +223,10 @@ export function ComposeReviewPage() {
             // Move to next contact
             const nextIndex = selectedContactIndex + 1
             if (nextIndex < filteredContacts.length) {
+                // Reset loaded ref so the useEffect loads the next contact's saved data
+                loadedContactIdRef.current = null
                 setCurrentContactId(filteredContacts[nextIndex].id)
             }
-            // Reset for next contact
-            setEmailBody("Hi {FirstName},\n\nI hope this email finds you well...")
-            setSubject("")
             toast.success("Email saved!", {
                 description: `Email for ${selectedContact.name} has been marked as ready.`,
             })

@@ -1,36 +1,9 @@
 /**
- * lib/socket/server.ts
+ * Socket.IO server + Redis Pub/Sub subscriber for real-time updates.
+ * Integrates Socket.IO with Next.js and subscribes to Redis channels
+ * to relay worker events to browser clients.
  *
- * Purpose: Socket.IO server + Redis Pub/Sub subscriber for real-time updates
- *
- * This file creates a Socket.IO server that integrates with the Next.js
- * HTTP server and subscribes to Redis Pub/Sub channels to relay events
- * from the background worker to connected browser clients.
- *
- * Architecture:
- * ┌─────────────────────────────────────────────────────────────────────┐
- * │                      NEXT.JS PROCESS                                │
- * │                                                                     │
- * │  ┌─────────────────┐     ┌─────────────────┐     ┌──────────────┐ │
- * │  │ Socket.IO       │ ←── │ Redis Pub/Sub   │ ←── │ Worker       │ │
- * │  │ Server          │     │ Subscriber      │     │ (publishes)  │ │
- * │  └────────┬────────┘     └─────────────────┘     └──────────────┘ │
- * │           │                                                        │
- * │           │ WebSocket                                              │
- * │           ▼                                                        │
- * └───────────┼────────────────────────────────────────────────────────┘
- *             │
- *             ▼
- *      ┌─────────────┐
- *      │  Browser    │
- *      │  Client     │
- *      └─────────────┘
- *
- * Why separate Redis connection for Pub/Sub?
- * Redis connections can operate in either normal mode or subscribe mode,
- * but not both. Once a connection calls SUBSCRIBE, it can only receive
- * messages on subscribed channels - it cannot execute other commands.
- * Therefore, we need a dedicated connection for Pub/Sub.
+ * Uses a dedicated Redis connection for Pub/Sub (subscribe mode).
  *
  * @module lib/socket/server
  */
@@ -96,7 +69,7 @@ interface CampaignCompleteEvent {
 
 /**
  * Singleton Socket.IO server instance.
- * We only want one server per Next.js process.
+ * Ensures one server per Next.js process.
  */
 let io: SocketServer | null = null;
 
@@ -118,22 +91,10 @@ const connectedClients = new Map<string, Set<string>>(); // userId -> Set<socket
 
 /**
  * Initializes the Socket.IO server and Redis Pub/Sub subscriber.
- *
- * This function should be called once during application startup,
- * typically in a custom server setup or API route that initializes
- * the WebSocket server.
+ * Should be called once during application startup.
  *
  * @param httpServer - The HTTP server to attach Socket.IO to
  * @returns The Socket.IO server instance
- *
- * @example
- * // In your custom server or initialization code
- * import { createServer } from 'http';
- * import { initSocket } from '@/lib/socket/server';
- *
- * const httpServer = createServer(app);
- * const io = initSocket(httpServer);
- * httpServer.listen(3000);
  */
 export function initSocket(httpServer: HTTPServer): SocketServer {
   // ─────────────────────────────────────────────────────────
@@ -191,12 +152,7 @@ export function initSocket(httpServer: HTTPServer): SocketServer {
 
 /**
  * Handles a new client connection.
- *
- * When a client connects, we:
- * 1. Authenticate them (verify userId)
- * 2. Join them to their user-specific room
- * 3. Track the connection for debugging
- * 4. Set up disconnect handler
+ * Authenticates, joins user room, tracks connection, and handles disconnect.
  *
  * @param socket - The connected socket
  */
@@ -207,13 +163,12 @@ function handleClientConnection(socket: Socket): void {
   // ─────────────────────────────────────────────────────────
   // AUTHENTICATION
   // ─────────────────────────────────────────────────────────
-  // Require userId for all connections. In production, you'd also
-  // verify a JWT token here.
+  // Require userId. Verify JWT in production.
 
   if (!userId) {
     console.warn(
       `[Socket.IO] Connection rejected - no userId provided. ` +
-        `Socket ID: ${socket.id}`
+      `Socket ID: ${socket.id}`
     );
     socket.emit('error', { message: 'Authentication required: userId missing' });
     socket.disconnect(true);
@@ -229,14 +184,13 @@ function handleClientConnection(socket: Socket): void {
 
   console.log(
     `[Socket.IO] Client connected - User: ${userId.substring(0, 8)}..., ` +
-      `Socket: ${socket.id}`
+    `Socket: ${socket.id}`
   );
 
   // ─────────────────────────────────────────────────────────
   // JOIN USER ROOM
   // ─────────────────────────────────────────────────────────
-  // Each user gets their own room. Events are broadcast to
-  // rooms, so only the relevant user receives their updates.
+  // Join user-specific room for targeted events.
 
   const userRoom = `user:${userId}`;
   socket.join(userRoom);
@@ -267,7 +221,7 @@ function handleClientConnection(socket: Socket): void {
   socket.on('disconnect', (reason: string) => {
     console.log(
       `[Socket.IO] Client disconnected - User: ${userId.substring(0, 8)}..., ` +
-        `Socket: ${socket.id}, Reason: ${reason}`
+      `Socket: ${socket.id}, Reason: ${reason}`
     );
 
     // Remove from tracking
@@ -283,7 +237,7 @@ function handleClientConnection(socket: Socket): void {
   // ─────────────────────────────────────────────────────────
   // HANDLE CLIENT EVENTS
   // ─────────────────────────────────────────────────────────
-  // Clients can subscribe to specific campaign updates
+  // Subscribe to campaign updates
 
   socket.on('subscribe:campaign', (campaignId: string) => {
     const campaignRoom = `campaign:${campaignId}`;
@@ -308,9 +262,7 @@ function handleClientConnection(socket: Socket): void {
 
 /**
  * Sets up the Redis Pub/Sub subscriber.
- *
- * Creates a dedicated Redis connection for subscribing to channels
- * and relays received messages to connected Socket.IO clients.
+ * Creates dedicated connection and subscribes to worker channels.
  */
 function setupRedisPubSub(): void {
   if (subscriberRedis) {
@@ -360,9 +312,7 @@ function setupRedisPubSub(): void {
 
 /**
  * Handles a message received from Redis Pub/Sub.
- *
- * Routes the message to the appropriate Socket.IO room based on
- * the channel and message content.
+ * Routes message to appropriate Socket.IO room.
  *
  * @param channel - The Redis channel the message was received on
  * @param data - The parsed message data
@@ -382,7 +332,7 @@ function handlePubSubMessage(
 
   console.log(
     `[Redis PubSub] Received on ${channel} - ` +
-      `User: ${userId.substring(0, 8)}, Campaign: ${campaignId.substring(0, 8)}`
+    `User: ${userId.substring(0, 8)}, Campaign: ${campaignId.substring(0, 8)}`
   );
 
   // ─────────────────────────────────────────────────────────
@@ -455,20 +405,11 @@ function handlePubSubMessage(
 
 /**
  * Emits an event directly to a specific user.
- *
- * Use this for events that don't come from the worker (e.g.,
- * notifications from API routes).
+ * Use for non-worker notifications.
  *
  * @param userId - The user's ID
  * @param event - The event name
  * @param data - The event data
- *
- * @example
- * // Notify user of something from an API route
- * emitToUser(userId, 'notification', {
- *   title: 'Campaign Ready',
- *   message: 'Your campaign is ready to send'
- * });
  */
 export function emitToUser(userId: string, event: string, data: unknown): void {
   if (!io) {
@@ -487,9 +428,7 @@ export function emitToUser(userId: string, event: string, data: unknown): void {
 
 /**
  * Emits an event to a specific campaign room.
- *
- * Use this for campaign-specific updates that should reach all
- * users watching that campaign.
+ * Reaches all users watching the campaign.
  *
  * @param campaignId - The campaign ID
  * @param event - The event name
@@ -576,18 +515,7 @@ export async function closeSocket(): Promise<void> {
 
 /**
  * Helper for initializing Socket.IO in Next.js API routes.
- *
- * Next.js doesn't give direct access to the HTTP server in App Router,
- * so we use a workaround: attach Socket.IO to the response socket's server.
- *
- * @example
- * // In app/api/socket/route.ts
- * import { initSocketInNextJS } from '@/lib/socket/server';
- *
- * export async function GET(req: Request) {
- *   // This won't work directly in App Router
- *   // See README for proper Next.js integration
- * }
+ * Workaround for lack of direct server access in App Router.
  */
 export function getOrCreateSocketServer(res: {
   socket?: { server?: HTTPServer & { io?: SocketServer } };

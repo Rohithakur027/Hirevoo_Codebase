@@ -1,30 +1,13 @@
 /**
- * lib/queue/email-queue.ts
- *
- * Purpose: BullMQ queue configuration for email campaign processing
- *
- * This file creates and configures the job queue that handles asynchronous
- * email campaign processing. Jobs added here are picked up by the worker
- * process (workers/index.ts) running in a separate terminal.
+ * BullMQ queue configuration for email campaign processing.
+ * Configures the job queue, retry logic, and job lifecycle management.
  *
  * Key features:
- * - Automatic retry with exponential backoff (2s → 4s → 8s)
- * - Job deduplication (prevents sending same campaign twice)
- * - Progress tracking integration
+ * - Automatic retry with exponential backoff (2s -> 4s -> 8s)
+ * - Job deduplication
+ * - Progress tracking
  * - Failed job retention for debugging (7 days)
  * - Completed job cleanup (24 hours, max 1000 jobs)
- *
- * Architecture:
- * ┌─────────────────┐         ┌─────────────────┐
- * │  API Route      │ ──────► │  Redis Queue    │
- * │  (queues job)   │         │  (BullMQ)       │
- * └─────────────────┘         └────────┬────────┘
- *                                      │
- *                                      ▼
- *                             ┌─────────────────┐
- *                             │  Worker Process │
- *                             │  (picks up job) │
- *                             └─────────────────┘
  *
  * @module lib/queue/email-queue
  */
@@ -38,10 +21,7 @@ import { getRedis } from './config';
 
 /**
  * Data structure for campaign send jobs.
- *
- * This interface defines the payload that gets serialized and stored
- * in Redis. Keep it minimal - only include IDs, not full objects.
- * The worker will fetch full data from the database.
+ * Minimal payload stored in Redis; worker fetches full data.
  */
 export interface SendCampaignJobData {
   /** UUID of the campaign to send */
@@ -83,25 +63,18 @@ export interface SendCampaignJobResult {
 // ============================================================
 
 /**
- * Default job options applied to all jobs added to this queue.
- *
- * These settings control how jobs are processed, retried, and cleaned up.
- * Each setting is carefully chosen for production reliability.
+ * Default job options applied to all jobs in this queue.
+ * Controls processing, retries, and cleanup.
  */
 const defaultJobOptions: JobsOptions = {
   // ─────────────────────────────────────────────────────────
   // RETRY CONFIGURATION
   // ─────────────────────────────────────────────────────────
-  // Number of retry attempts before marking job as failed.
-  // We use 3 attempts which gives the job multiple chances to
-  // succeed in case of transient errors (network issues, rate limits).
+  // Retry 3 times for transient errors
   attempts: 3,
 
-  // Backoff strategy for retries.
-  // Exponential backoff prevents overwhelming the system after failures.
-  // - Attempt 1 fails → wait 2 seconds → retry
-  // - Attempt 2 fails → wait 4 seconds → retry
-  // - Attempt 3 fails → wait 8 seconds → final attempt
+  // Exponential backoff
+  // 2s -> 4s -> 8s
   backoff: {
     type: 'exponential',
     delay: 2000, // Base delay: 2 seconds
@@ -110,19 +83,13 @@ const defaultJobOptions: JobsOptions = {
   // ─────────────────────────────────────────────────────────
   // JOB LIFECYCLE MANAGEMENT
   // ─────────────────────────────────────────────────────────
-  // How long to keep completed jobs in Redis.
-  // Keeping completed jobs allows us to:
-  // 1. Show job history to users
-  // 2. Debug issues by examining past jobs
-  // 3. Generate analytics/reports
+  // Keep completed jobs for history/debugging (24h)
   removeOnComplete: {
     age: 86400, // Keep for 24 hours (in seconds)
     count: 1000, // Keep max 1000 completed jobs
   },
 
-  // How long to keep failed jobs in Redis.
-  // Failed jobs are kept longer for debugging purposes.
-  // You can examine failed jobs in the BullMQ dashboard or via CLI.
+  // Keep failed jobs for debugging (7 days)
   removeOnFail: {
     age: 604800, // Keep for 7 days (in seconds)
     count: 5000, // Keep max 5000 failed jobs
@@ -131,27 +98,13 @@ const defaultJobOptions: JobsOptions = {
   // ─────────────────────────────────────────────────────────
   // TIMEOUT CONFIGURATION
   // ─────────────────────────────────────────────────────────
-  // Maximum time a job can run before being considered stalled.
-  // This prevents zombie jobs from blocking the queue forever.
-  //
-  // Calculation for timeout:
-  // - Gmail rate limit: ~5 emails/second
-  // - Max emails per campaign: ~500 (for basic plan)
-  // - Processing time: 500 emails × 200ms = 100 seconds
-  // - Add buffer for database operations: 10 minutes
-  // - Add safety margin: 30 minutes total
-  // timeout: 1800000, // 30 minutes - BullMQ Pro feature, using job-level instead
+  // timeout: 1800000, // 30 minutes
 };
 
 /**
  * Get the main email queue instance.
- *
- * This queue handles all email campaign jobs. Jobs are added by the
- * API route and processed by the worker.
- *
+ * Handles all email campaign jobs.
  * Queue name: 'emails'
- * - Used to identify this queue in Redis
- * - Multiple queues can coexist (e.g., 'emails', 'notifications', 'reports')
  */
 
 // Lazy-loaded queue instance
@@ -163,7 +116,7 @@ export function getEmailQueue(): Queue<SendCampaignJobData, SendCampaignJobResul
       'emails',
       {
         // Use our configured Redis connection
-        connection: getRedis(),
+        connection: getRedis() as any,
 
         // Apply default job options to all jobs
         defaultJobOptions,
@@ -185,7 +138,7 @@ export function getEmailQueue(): Queue<SendCampaignJobData, SendCampaignJobResul
       }
     );
   }
-  return emailQueueInstance;
+  return emailQueueInstance as Queue<SendCampaignJobData, SendCampaignJobResult>;
 }
 
 // For backward compatibility, export the lazy-loaded instance
@@ -197,27 +150,13 @@ export const emailQueue = getEmailQueue();
 
 /**
  * Queues a campaign for background email sending.
- *
- * This is the main entry point called by the API route when a user
- * clicks "Send Campaign". It performs validation, deduplication,
- * and adds the job to the queue.
+ * Performs validation, deduplication, and adds job to queue.
  *
  * @param campaignId - UUID of the campaign to send
  * @param userId - UUID of the user who owns the campaign
  * @param options - Optional configuration for this specific job
  * @returns Object containing the job ID and queue position
- *
- * @example
- * // In API route
- * const result = await queueCampaignSend(campaignId, userId);
- * return Response.json({
- *   success: true,
- *   jobId: result.jobId,
- *   message: 'Campaign queued for sending'
- * });
- *
- * @throws {Error} If campaign is already being processed
- * @throws {Error} If queue is unavailable
+ * @throws {Error} If campaign is already being processed or queue is unavailable
  */
 export async function queueCampaignSend(
   campaignId: string,
@@ -239,17 +178,14 @@ export async function queueCampaignSend(
 
   console.log(
     `${logPrefix} Queueing campaign send - ` +
-      `Campaign: ${campaignId}, User: ${userId}`
+    `Campaign: ${campaignId}, User: ${userId}`
   );
 
   // ─────────────────────────────────────────────────────────
   // STEP 1: CHECK FOR DUPLICATE JOBS (IDEMPOTENCY)
   // ─────────────────────────────────────────────────────────
-  // Prevent queuing the same campaign multiple times.
-  // This can happen if user double-clicks or refreshes during loading.
-  //
-  // We use campaignId as the job ID, which ensures uniqueness.
-  // BullMQ will reject adding a job with an existing ID.
+  // Prevent queuing duplicates.
+  // Use campaignId as the job ID for uniqueness.
 
   const jobId = `campaign-${campaignId}`;
 
@@ -263,12 +199,12 @@ export async function queueCampaignSend(
     if (['waiting', 'delayed', 'active'].includes(state)) {
       console.warn(
         `${logPrefix} Campaign ${campaignId} already has active job ` +
-          `(ID: ${jobId}, State: ${state}). Rejecting duplicate.`
+        `(ID: ${jobId}, State: ${state}). Rejecting duplicate.`
       );
 
       throw new Error(
         `Campaign is already being processed. ` +
-          `Current status: ${state}. Please wait for it to complete.`
+        `Current status: ${state}. Please wait for it to complete.`
       );
     }
 
@@ -276,7 +212,7 @@ export async function queueCampaignSend(
     // (e.g., user wants to retry a failed campaign)
     console.log(
       `${logPrefix} Previous job for campaign ${campaignId} found ` +
-        `in state: ${state}. Allowing re-queue.`
+      `in state: ${state}. Allowing re-queue.`
     );
   }
 
@@ -321,7 +257,7 @@ export async function queueCampaignSend(
 
   console.log(
     `${logPrefix} ✅ Job queued successfully - ` +
-      `ID: ${job.id}, Position: ~${waitingCount + 1}`
+    `ID: ${job.id}, Position: ~${waitingCount + 1}`
   );
 
   return {
@@ -333,17 +269,8 @@ export async function queueCampaignSend(
 /**
  * Gets the current status of a campaign job.
  *
- * Use this to show progress to the user or check if a campaign
- * has been processed.
- *
  * @param campaignId - UUID of the campaign
  * @returns Job status including progress, or null if not found
- *
- * @example
- * const status = await getCampaignJobStatus(campaignId);
- * if (status?.state === 'active') {
- *   console.log(`Progress: ${status.progress}%`);
- * }
  */
 export async function getCampaignJobStatus(campaignId: string): Promise<{
   jobId: string;
@@ -382,19 +309,10 @@ export async function getCampaignJobStatus(campaignId: string): Promise<{
 
 /**
  * Cancels a pending campaign job.
- *
- * Can only cancel jobs that haven't started processing yet.
- * Once a job is active, it cannot be cancelled (would leave
- * emails in inconsistent state).
+ * Only cancels jobs that haven't started processing.
  *
  * @param campaignId - UUID of the campaign to cancel
  * @returns true if cancelled, false if not found or already processing
- *
- * @example
- * const cancelled = await cancelCampaignJob(campaignId);
- * if (!cancelled) {
- *   console.log('Job already processing, cannot cancel');
- * }
  */
 export async function cancelCampaignJob(campaignId: string): Promise<boolean> {
   const jobId = `campaign-${campaignId}`;
@@ -411,7 +329,7 @@ export async function cancelCampaignJob(campaignId: string): Promise<boolean> {
   if (state === 'active') {
     console.warn(
       `[Queue] Cannot cancel job ${jobId} - already processing. ` +
-        `State: ${state}`
+      `State: ${state}`
     );
     return false;
   }
@@ -424,8 +342,6 @@ export async function cancelCampaignJob(campaignId: string): Promise<boolean> {
 
 /**
  * Gets queue health metrics.
- *
- * Use this for monitoring dashboards and health checks.
  *
  * @returns Queue statistics
  */
@@ -459,9 +375,7 @@ export async function getQueueHealth(): Promise<{
 
 /**
  * Pauses the queue (stops processing new jobs).
- *
- * Use during maintenance or when you need to stop processing.
- * Active jobs will complete, but no new jobs will be picked up.
+ * Active jobs will complete.
  */
 export async function pauseQueue(): Promise<void> {
   await emailQueue.pause();
@@ -478,8 +392,7 @@ export async function resumeQueue(): Promise<void> {
 
 /**
  * Cleans up old jobs from the queue.
- *
- * Run this periodically (e.g., daily cron) to free up Redis memory.
+ * Run periodically to free up Redis memory.
  *
  * @param olderThanMs - Remove jobs older than this (default: 7 days)
  */
@@ -496,8 +409,8 @@ export async function cleanupOldJobs(
 
   console.log(
     `[Queue] Cleanup complete - ` +
-      `Removed ${completedRemoved.length} completed, ` +
-      `${failedRemoved.length} failed jobs`
+    `Removed ${completedRemoved.length} completed, ` +
+    `${failedRemoved.length} failed jobs`
   );
 
   return {

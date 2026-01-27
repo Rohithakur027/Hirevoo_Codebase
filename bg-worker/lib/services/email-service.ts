@@ -1,20 +1,11 @@
 /**
- * lib/services/email-service.ts
+ * Gmail API wrapper for sending emails with production-grade error handling.
+ * Handles OAuth2 token management, email composition, rate limiting, and error handling.
  *
- * Purpose: Gmail API wrapper for sending emails with production-grade error handling
- *
- * This service handles all Gmail API interactions including:
- * - OAuth2 token management (refresh expired tokens automatically)
- * - Email composition (RFC 2822 format)
- * - Rate limiting awareness
- * - Comprehensive error handling and categorization
- *
- * Gmail API Limits (important for understanding the code):
- * - Daily sending limit: 500 emails (personal), 2000 (workspace)
+ * Gmail API Limits:
+ * - Daily sending limit: 500 (personal), 2000 (workspace)
  * - Per-second limit: ~5 emails
  * - Max email size: 25MB
- *
- * @module lib/services/email-service
  */
 
 import dotenv from 'dotenv';
@@ -22,6 +13,7 @@ dotenv.config({ path: '.env.local' });
 
 import { google, gmail_v1 } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
+import { decrypt } from '../encryption';
 
 // ============================================================
 // TYPE DEFINITIONS
@@ -108,9 +100,7 @@ export type EmailErrorCode =
 
 /**
  * Supabase client for database operations.
- *
  * Uses service role key for server-side operations (bypasses RLS).
- * This is safe because this code only runs on the server.
  */
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -122,11 +112,8 @@ const supabase = createClient(
 // ============================================================
 
 /**
- * Creates an OAuth2 client configured with our app's credentials.
- *
- * This client is used to:
- * 1. Refresh expired access tokens
- * 2. Authenticate Gmail API requests
+ * Creates an OAuth2 client configured with app credentials.
+ * Used to refresh tokens and authenticate Gmail API requests.
  */
 function createOAuth2Client() {
   const clientId = process.env.GMAIL_CLIENT_ID;
@@ -136,7 +123,7 @@ function createOAuth2Client() {
   if (!clientId || !clientSecret) {
     throw new Error(
       'Gmail OAuth credentials not configured. ' +
-        'Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in environment variables.'
+      'Please set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in environment variables.'
     );
   }
 
@@ -148,19 +135,18 @@ function createOAuth2Client() {
 // ============================================================
 
 /**
- * Fetches Gmail tokens for a user from the database.
+ * Fetches and decrypts Gmail refresh token for a user.
+ * Access tokens are obtained by refreshing on every use.
  *
  * @param userId - UUID of the user
- * @returns Token data or null if not found
+ * @returns Decrypted refresh token or null if not found
  */
 async function getUserGmailTokens(userId: string): Promise<{
-  accessToken: string;
   refreshToken: string;
-  expiresAt: Date;
 } | null> {
   const { data: user, error } = await supabase
     .from('users')
-    .select('gmail_access_token, gmail_refresh_token, gmail_token_expires_at')
+    .select('gmail_refresh_token_IV, gmail_refresh_token_content, gmail_refresh_token_tag')
     .eq('id', userId)
     .single();
 
@@ -169,115 +155,74 @@ async function getUserGmailTokens(userId: string): Promise<{
     return null;
   }
 
-  if (!user?.gmail_access_token || !user?.gmail_refresh_token) {
+  if (!user?.gmail_refresh_token_content || !user?.gmail_refresh_token_IV || !user?.gmail_refresh_token_tag) {
     console.warn(`[EmailService] User ${userId} has no Gmail tokens`);
     return null;
   }
 
-  return {
-    accessToken: user.gmail_access_token,
-    refreshToken: user.gmail_refresh_token,
-    expiresAt: new Date(user.gmail_token_expires_at),
-  };
-}
+  try {
+    const refreshToken = decrypt({
+      salt: user.gmail_refresh_token_IV,
+      content: user.gmail_refresh_token_content,
+      tag: user.gmail_refresh_token_tag,
+    });
 
-/**
- * Updates Gmail tokens in the database after a refresh.
- *
- * @param userId - UUID of the user
- * @param accessToken - New access token
- * @param expiresAt - New expiration time
- */
-async function updateUserGmailTokens(
-  userId: string,
-  accessToken: string,
-  expiresAt: Date
-): Promise<void> {
-  const { error } = await supabase
-    .from('users')
-    .update({
-      gmail_access_token: accessToken,
-      gmail_token_expires_at: expiresAt.toISOString(),
-    })
-    .eq('id', userId);
-
-  if (error) {
-    console.error(`[EmailService] Failed to update tokens for user ${userId}:`, error);
-    throw new Error('Failed to update Gmail tokens in database');
+    return { refreshToken };
+  } catch (e) {
+    console.error(`[EmailService] Failed to decrypt token for user ${userId}:`, e);
+    return null;
   }
-
-  console.log(`[EmailService] Tokens updated for user ${userId}`);
 }
 
 /**
- * Checks if a token is expired or about to expire.
- *
- * We consider a token "expired" if it has less than 5 minutes
- * of validity remaining. This gives us buffer time to refresh
- * before actual expiration.
- *
- * @param expiresAt - Token expiration timestamp
- * @returns true if token should be refreshed
- */
-function isTokenExpired(expiresAt: Date): boolean {
-  const bufferMs = 5 * 60 * 1000; // 5 minutes buffer
-  const now = new Date();
-  return expiresAt.getTime() - bufferMs < now.getTime();
-}
-
-/**
- * Refreshes an expired OAuth2 access token.
- *
- * Uses the refresh token to obtain a new access token from Google.
- * Updates the database with the new token.
+ * Gets a valid access token by refreshing using the stored refresh token.
+ * Access tokens are obtained fresh each time using the encrypted refresh token.
  *
  * @param userId - UUID of the user
- * @param refreshToken - The refresh token
- * @returns New access token
+ * @param refreshToken - The decrypted refresh token
+ * @returns Fresh access token
  */
-async function refreshAccessToken(
+async function getAccessToken(
   userId: string,
   refreshToken: string
 ): Promise<string> {
-  console.log(`[EmailService] Refreshing access token for user ${userId}`);
+  console.log(`[EmailService] Getting access token for user ${userId}`);
 
   const oauth2Client = createOAuth2Client();
   oauth2Client.setCredentials({ refresh_token: refreshToken });
 
   try {
-    console.log(`[EmailService] Attempting to refresh token for user ${userId}`);
     const { credentials } = await oauth2Client.refreshAccessToken();
     console.log(`[EmailService] Google refresh response:`, {
       hasAccessToken: !!credentials.access_token,
-      hasRefreshToken: !!credentials.refresh_token,
       expiryDate: credentials.expiry_date,
-      scope: credentials.scope
     });
 
     if (!credentials.access_token) {
       throw new Error('No access token returned from refresh');
     }
 
-    // Calculate new expiration time
-    // Google tokens typically expire in 1 hour (3600 seconds)
-    const expiresAt = credentials.expiry_date
-      ? new Date(credentials.expiry_date)
-      : new Date(Date.now() + 3600 * 1000);
-
-    // Update database with new token
-    await updateUserGmailTokens(userId, credentials.access_token, expiresAt);
-
-    console.log(
-      `[EmailService] Token refreshed successfully for user ${userId}. ` +
-        `Expires at: ${expiresAt.toISOString()}`
-    );
-
+    console.log(`[EmailService] Access token obtained for user ${userId}`);
     return credentials.access_token;
-  } catch (error) {
+  } catch (error: any) {
     console.error(
-      `[EmailService] Failed to refresh token for user ${userId}:`,
+      `[EmailService] Failed to get access token for user ${userId}:`,
       error
     );
+
+    // Handle invalid_grant (revoked or expired refresh token)
+    const isInvalidGrant =
+      error?.response?.data?.error === 'invalid_grant' ||
+      error?.message?.includes('invalid_grant');
+
+    if (isInvalidGrant) {
+      console.warn(`[EmailService] invalid_grant for user ${userId} — marking gmail_connected = false`);
+      await supabase
+        .from('users')
+        .update({ gmail_connected: false, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+    }
+
     throw new Error(
       'Failed to refresh Gmail token. User may need to reconnect their Gmail account.'
     );
@@ -290,9 +235,7 @@ async function refreshAccessToken(
 
 /**
  * Validates an email address format.
- *
- * Uses a practical regex that catches common formatting issues
- * without being overly strict about edge cases.
+ * Uses a practical regex to catch common issues without being overly strict.
  *
  * @param email - Email address to validate
  * @returns true if email format is valid
@@ -308,12 +251,10 @@ function isValidEmail(email: string): boolean {
 
 /**
  * Creates an RFC 2822 compliant email message.
- *
- * RFC 2822 is the standard format for email messages.
- * The message includes headers (From, To, Subject) and body.
+ * Includes headers (From, To, Subject) and body.
  *
  * @param params - Email parameters
- * @param fromEmail - Sender's email address (from Gmail account)
+ * @param fromEmail - Sender's email address
  * @returns Formatted email string
  */
 function createEmailMessage(params: SendEmailParams, fromEmail: string): string {
@@ -345,11 +286,7 @@ function createEmailMessage(params: SendEmailParams, fromEmail: string): string 
 }
 
 /**
- * Encodes an email message for Gmail API.
- *
- * Gmail API requires messages to be base64url encoded.
- * This is base64 with URL-safe characters (+ → -, / → _)
- * and no padding (= removed).
+ * Encodes an email message for Gmail API (base64url).
  *
  * @param message - RFC 2822 formatted email string
  * @returns Base64url encoded string
@@ -373,35 +310,11 @@ function encodeEmail(message: string): string {
 // ============================================================
 
 /**
- * Sends an email via Gmail API with full error handling and token management.
- *
- * This is the main function used by the worker to send individual emails.
- * It handles:
- * - Token validation and automatic refresh
- * - Email validation and formatting
- * - Gmail API interaction
- * - Comprehensive error categorization
+ * Sends an email via Gmail API with error handling and token management.
+ * Handles token refresh, validation, formatting, and error categorization.
  *
  * @param params - Email parameters (to, subject, body, userId)
  * @returns Success result with message ID, or error result with details
- *
- * @example
- * const result = await sendEmail({
- *   to: 'recipient@example.com',
- *   toName: 'John Doe',
- *   subject: 'Welcome to Hirevoo!',
- *   body: '<h1>Welcome!</h1><p>Thanks for signing up.</p>',
- *   userId: 'user-uuid-here'
- * });
- *
- * if (result.success) {
- *   console.log('Email sent:', result.messageId);
- * } else {
- *   console.error('Failed:', result.errorMessage);
- *   if (result.isRetryable) {
- *     // Queue for retry
- *   }
- * }
  */
 export async function sendEmail(
   params: SendEmailParams
@@ -415,7 +328,7 @@ export async function sendEmail(
   // ─────────────────────────────────────────────────────────
   // STEP 1: VALIDATE INPUT PARAMETERS
   // ─────────────────────────────────────────────────────────
-  // Validate early to fail fast and avoid wasted API calls
+  // Validate early to fail fast
 
   if (!isValidEmail(to)) {
     console.warn(`${logPrefix} Invalid recipient email: ${to}`);
@@ -469,49 +382,33 @@ export async function sendEmail(
       success: false,
       errorCode: 'TOKEN_INVALID',
       errorMessage:
-        'Gmail not connected. Please reconnect your Gmail account in Settings.',
+        'Gmail is not connected. Please connect your Gmail account in Settings before sending.',
       isRetryable: false, // User action required
     };
   }
 
-  console.log(`${logPrefix} Tokens found, expires at: ${tokens.expiresAt.toISOString()}, expired: ${isTokenExpired(tokens.expiresAt)}`);
+  console.log(`${logPrefix} Encrypted refresh token found, obtaining access token...`);
 
   // ─────────────────────────────────────────────────────────
-  // STEP 3: REFRESH TOKEN IF EXPIRED
+  // STEP 3: GET ACCESS TOKEN (refresh since not stored)
   // ─────────────────────────────────────────────────────────
 
-  let accessToken = tokens.accessToken;
+  let accessToken: string;
 
-  if (isTokenExpired(tokens.expiresAt)) {
-    console.log(`${logPrefix} Token expired, refreshing...`);
+  try {
+    accessToken = await getAccessToken(userId, tokens.refreshToken);
+  } catch (error: any) {
+    console.error(`${logPrefix} Failed to get access token:`, error);
 
-    try {
-      accessToken = await refreshAccessToken(userId, tokens.refreshToken);
-    } catch (error) {
-      console.error(`${logPrefix} Token refresh failed:`, error);
-      console.error(`${logPrefix} Error details:`, {
-        message: error.message,
-        name: error.name,
-        stack: error.stack
-      });
-
-      // Check if it's a specific Google API error
-      if (error.message?.includes('invalid_grant') ||
-          error.message?.includes('refresh token') ||
-          error.message?.includes('expired')) {
-        console.error(`${logPrefix} Refresh token appears to be invalid/expired`);
-      }
-
-      return {
-        success: false,
-        errorCode: 'TOKEN_INVALID',
-        errorMessage:
-          'Gmail session expired and could not be renewed. ' +
-          'Please reconnect your Gmail account in Settings.',
-        isRetryable: false, // User action required
-        originalError: error,
-      };
-    }
+    return {
+      success: false,
+      errorCode: 'TOKEN_INVALID',
+      errorMessage:
+        'Gmail session expired and could not be renewed. ' +
+        'Please reconnect your Gmail account in Settings.',
+      isRetryable: false, // User action required
+      originalError: error,
+    };
   }
 
   // ─────────────────────────────────────────────────────────
@@ -526,7 +423,7 @@ export async function sendEmail(
   // ─────────────────────────────────────────────────────────
   // STEP 5: GET SENDER'S EMAIL ADDRESS
   // ─────────────────────────────────────────────────────────
-  // We need the authenticated user's email for the "From" header
+  // Need authenticated user's email for "From" header
 
   let senderEmail: string;
   try {
@@ -565,7 +462,7 @@ export async function sendEmail(
 
     console.log(
       `${logPrefix} ✅ Email sent successfully to ${to} ` +
-        `(ID: ${response.data.id}, Duration: ${durationMs}ms)`
+      `(ID: ${response.data.id}, Duration: ${durationMs}ms)`
     );
 
     return {
@@ -585,17 +482,8 @@ export async function sendEmail(
 // ============================================================
 
 /**
- * Handles Gmail API errors and categorizes them for appropriate retry behavior.
- *
- * Gmail API errors come in various forms:
- * - HTTP status codes (401, 403, 429, etc.)
- * - Error codes in response body
- * - Network errors
- *
- * This function examines the error and determines:
- * 1. What category it falls into
- * 2. Whether it's safe to retry
- * 3. What message to show the user
+ * Handles Gmail API errors and categorizes them for retry behavior.
+ * Determines error category, retry safety, and user message.
  *
  * @param error - The caught error
  * @param logPrefix - Prefix for log messages
@@ -758,7 +646,7 @@ function handleGmailError(error: unknown, logPrefix: string): SendEmailError {
   // When in doubt, allow retry but log for investigation
   console.error(
     `${logPrefix} Unknown error type - Code: ${statusCode}, ` +
-      `Message: ${gmailError.message}, Reason: ${errorReason}`
+    `Message: ${gmailError.message}, Reason: ${errorReason}`
   );
 
   return {
@@ -777,9 +665,7 @@ function handleGmailError(error: unknown, logPrefix: string): SendEmailError {
 
 /**
  * Delays execution for a specified number of milliseconds.
- *
  * Used for rate limiting between email sends.
- * Gmail allows ~5 emails/second, so 200ms delay is safe.
  *
  * @param ms - Milliseconds to wait
  */
@@ -813,8 +699,10 @@ export async function getGmailAddress(userId: string): Promise<string | null> {
   if (!tokens) return null;
 
   try {
+    const accessToken = await getAccessToken(userId, tokens.refreshToken);
+
     const oauth2Client = createOAuth2Client();
-    oauth2Client.setCredentials({ access_token: tokens.accessToken });
+    oauth2Client.setCredentials({ access_token: accessToken });
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const profile = await gmail.users.getProfile({ userId: 'me' });

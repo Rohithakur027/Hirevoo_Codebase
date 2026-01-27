@@ -43,3 +43,7 @@ export function formatShortDate(isoString: string): string {
         hour12: true,
     })
 }
+
+export function getUTCTimeISO(): string {
+    return new Date().toISOString()
+}

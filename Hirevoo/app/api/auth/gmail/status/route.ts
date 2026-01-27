@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { createClient } from '@supabase/supabase-js';
-import { google } from 'googleapis';
+import { gmailClient } from "@/lib/gmail/client";
 
 // Create a Supabase client with service role key for admin operations
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 export async function GET() {
@@ -26,12 +26,13 @@ export async function GET() {
     }
 
     try {
-        console.log("[Gmail Status] Fetching user data from Supabase for user:", (session.user as any).id);
+        const userId = (session.user as any).id;
+        console.log("[Gmail Status] Checking status for user:", userId);
 
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('gmail_connected, gmail_permission_level, gmail_access_token')
-            .eq('id', (session.user as any).id)
+            .select('gmail_connected, gmail_permission_level')
+            .eq('id', userId)
             .single();
 
         if (error) {
@@ -43,32 +44,30 @@ export async function GET() {
             });
         }
 
-        console.log("[Gmail Status] User data:", {
-            gmail_connected: user?.gmail_connected,
-            gmail_permission_level: user?.gmail_permission_level,
-            has_access_token: !!user?.gmail_access_token
-        });
+        const isConnected = !!user?.gmail_connected;
+        console.log("[Gmail Status] DB Connected Flag:", isConnected);
 
-        // If connected, fetch the Gmail email address
         let gmailEmail: string | null = null;
-        if (user?.gmail_connected && user?.gmail_access_token) {
-            try {
-                const oauth2Client = new google.auth.OAuth2();
-                oauth2Client.setCredentials({ access_token: user.gmail_access_token });
 
-                const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-                const profile = await gmail.users.getProfile({ userId: 'me' });
-                gmailEmail = profile.data.emailAddress || null;
+        if (isConnected) {
+            // Verify actual connectivity and fetch email using stateless client
+            // Implicitly tests if refresh token is valid
+            try {
+                gmailEmail = await gmailClient.getConnectedEmail(userId);
                 console.log("[Gmail Status] Fetched Gmail email:", gmailEmail);
-            } catch (gmailError) {
-                console.error("[Gmail Status] Error fetching Gmail profile:", gmailError);
-                // Token might be expired, but we still report as connected
-                // The refresh will happen when they try to use Gmail
+
+                // If email fetch fails (e.g. invalid refresh token), 
+                // consider disconnected or return null email
+                if (!gmailEmail) {
+                    console.warn("[Gmail Status] Connected in DB but failed to fetch email");
+                }
+            } catch (e) {
+                console.error("[Gmail Status] Failed to verify connection with Gmail:", e);
             }
         }
 
         const response = {
-            isConnected: !!user?.gmail_connected,
+            isConnected: isConnected && !!gmailEmail, // Only consider connected if gmail reachable
             permissionLevel: user?.gmail_permission_level || null,
             email: gmailEmail
         };

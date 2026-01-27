@@ -134,7 +134,7 @@ export function RecentActivity() {
                             </p>
                         </div>
                         <Button
-                            className="text-xs font-medium px-4 py-1 rounded-none w-fit text-black hover:opacity-90 h-7 mt-2 disabled:opacity-70"
+                            className="text-xs font-medium px-4 py-1 rounded-[6px] w-fit text-black hover:opacity-90 h-7 mt-2 disabled:opacity-70"
                             style={{ backgroundColor: "#c9f763" }}
                             onClick={handleConnectClick}
                             disabled={isConnecting}

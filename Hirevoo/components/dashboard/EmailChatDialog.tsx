@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Loader2, Check, Clock, X, Send } from "lucide-react"
+import { Loader2, Check, Clock, X, Send, ExternalLink } from "lucide-react"
 import type { Recipient, Message } from "@/lib/data"
 
 interface EmailChatDialogProps {
@@ -24,7 +24,7 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
 
     useEffect(() => {
         if (open && recipient) {
-            fetchConversation(recipient.id)
+            fetchConversation(recipient.campaignContactId || recipient.id)
         } else {
             setMessages([])
         }
@@ -37,13 +37,13 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
         }
     }, [messages])
 
-    const fetchConversation = async (recipientId: string) => {
+    const fetchConversation = async (campaignContactId: string) => {
         setIsLoading(true)
         try {
-            const res = await fetch(`/api/emails/conversation?recipientId=${recipientId}`)
+            const res = await fetch(`/api/emails/conversation?campaignContactId=${campaignContactId}`)
             if (res.ok) {
                 const data = await res.json()
-                setMessages(data.messages)
+                setMessages(data.messages || [])
             }
         } catch (error) {
             console.error("Failed to fetch conversation:", error)
@@ -82,12 +82,7 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
                         <Check className="w-[14px] h-[14px] text-[#53bdeb] absolute left-[5px] bottom-[-2px] stroke-[2.5]" />
                     </div>
                 )
-            case "delivered": // Treating delivered as read/blue per "no 2 tick without color" requirement or potentially just sent fallback. 
-                // User said "there is no 2 tick without color". So we skip 2 gray. 
-                // If delivered comes, assuming it shouldn't show 2 gray. 
-                // I'll map 'delivered' to 'sent' (1 tick) to be safe, or if it implies read, blue. 
-                // Safest interpretation: Email Delivered but not Opened -> 1 Tick (Sent). 
-                // So I will fall through to 'sent' or just return single tick.
+            case "delivered":
                 return <Check className="w-[14px] h-[14px] text-gray-400 stroke-[2.5]" />
             case "sent":
                 return <Check className="w-[14px] h-[14px] text-gray-400 stroke-[2.5]" />
@@ -127,7 +122,7 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
             from: "user",
             content: newMessage.trim(),
             timestamp: new Date().toISOString(),
-            status: undefined // undefined = pending (clock icon)
+            status: undefined // undefined implies pending
         }
 
         // Optimistic update
@@ -184,12 +179,23 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
                             </Avatar>
                             <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
                         </div>
-                        <div className="flex flex-col gap-0.5 overflow-hidden">
-                            <DialogTitle className="font-semibold text-gray-900 leading-none truncate text-base m-0">
-                                {recipient.name}
+                        <div className="flex flex-col gap-0.5 overflow-hidden justify-center">
+                            <DialogTitle className="font-semibold text-gray-900 leading-none truncate text-sm m-0">
+                                {recipient.email}
                             </DialogTitle>
-                            <span className="text-xs text-gray-500 font-normal truncate">{recipient.email}</span>
                         </div>
+                        <button
+                            onClick={() => {
+                                const url = recipient.gmailThreadId
+                                    ? `https://mail.google.com/mail/u/0/#all/${recipient.gmailThreadId}`
+                                    : `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(recipient.email)}`
+                                window.open(url, '_blank')
+                            }}
+                            className="ml-auto mr-2 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-xs font-medium text-slate-700 transition-colors flex items-center gap-1.5 flex-shrink-0"
+                        >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Open in Gmail</span>
+                        </button>
                     </div>
                     <button
                         onClick={() => onOpenChange(false)}
@@ -230,7 +236,7 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
                                                     >
                                                         <div
                                                             className={`
-                                                            max-w-[80%] rounded-2xl px-3 py-2 shadow-sm text-sm relative group
+                                                            max-w-[80%] rounded-[20px] px-3 py-2 shadow-sm text-sm relative group
                                                             ${isMe
                                                                     ? "bg-black text-white rounded-tr-none"
                                                                     : "bg-white text-gray-900 rounded-tl-none border border-gray-100"

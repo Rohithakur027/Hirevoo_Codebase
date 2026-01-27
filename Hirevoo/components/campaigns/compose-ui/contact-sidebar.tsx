@@ -4,7 +4,7 @@ import { Search, CheckCircle2, Circle, Clock } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import type { Contact } from "./compose-review-page"
+import type { Contact } from "@/components/campaigns/compose-ui/compose-review-page"
 
 interface ContactSidebarProps {
     contacts: Contact[]

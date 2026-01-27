@@ -2,6 +2,7 @@ export type RecipientStatus = "Sent" | "Opened" | "Replied" | "Pending"
 
 export interface Recipient {
     id: string
+    campaignContactId?: string
     name: string
     email: string
     status: RecipientStatus
@@ -10,6 +11,7 @@ export interface Recipient {
     initials?: string
     role?: string
     company?: string
+    gmailThreadId?: string
 }
 
 export interface Message {
@@ -17,7 +19,7 @@ export interface Message {
     from: "user" | "recipient"
     content: string
     timestamp: string
-    status?: "sent" | "delivered" | "read" | "failed" // Added status
+    status?: "sent" | "delivered" | "read" | "failed"
 }
 
 export interface Campaign {
@@ -120,61 +122,3 @@ export const dailyData: DailyData[] = Array.from({ length: 7 }).map((_, i) => {
     }
 })
 
-export function getEmailConversation(recipientId: string): Message[] {
-    // Mock conversation
-    return [
-        {
-            id: "m1",
-            from: "user",
-            content: "Hi there, I noticed you were hiring. I have 5 years of experience in React and Node.js and would love to chat.",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(), // 2 days ago
-            status: "read"
-        },
-        {
-            id: "m2",
-            from: "recipient",
-            content: "Thanks for reaching out! Your profile looks interesting. Can you send more info about your last project?",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 40).toISOString(),
-        },
-        {
-            id: "m3",
-            from: "user",
-            content: "Absolutely! Here is our portfolio link: portfolio.com/johndoe. Let me know if you need anything else.",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // Yesterday
-            status: "read"
-        },
-        {
-            id: "m5",
-            from: "recipient",
-            content: "Got it, thanks. I'll share this with the team.",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 22).toISOString(),
-        },
-        {
-            id: "m6",
-            from: "user",
-            content: "Great, looking forward to hearing from you.",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(), // Today
-            status: "read"
-        },
-        {
-            id: "m7",
-            from: "recipient",
-            content: "We'd like to schedule a call. How does tomorrow at 2 PM EST sound?",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-        },
-        {
-            id: "m8",
-            from: "user",
-            content: "That works perfectly!",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 1.5).toISOString(),
-            status: "delivered"
-        },
-        {
-            id: "m4",
-            from: "user",
-            content: "Just checking in on this?",
-            timestamp: new Date(Date.now() - 1000 * 60 * 60 * 1).toISOString(),
-            status: "failed"
-        },
-    ]
-}

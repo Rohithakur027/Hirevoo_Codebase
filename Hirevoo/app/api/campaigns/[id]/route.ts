@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { authOptions } from '@/lib/auth';
+import { getUTCTimeISO } from '@/lib/date-helpers';
 
 // ============================================================
 // TYPE DEFINITIONS
@@ -136,6 +137,7 @@ export async function GET(
     // 6. Format response
     const formattedContacts = (contacts || []).map((c: any) => ({
       id: c.contact_id || c.id,
+      campaignContactId: c.id,
       name: c.contacts?.name || '',
       email: c.contacts?.email || '',
       company: c.contacts?.company || undefined,
@@ -145,6 +147,7 @@ export async function GET(
       emailBody: c.email_body || '',
       sentAt: c.sent_at,
       error: c.error_message,
+      gmailThreadId: c.gmail_thread_id,
     }));
 
     return NextResponse.json({
@@ -237,7 +240,7 @@ export async function PATCH(
     // 5. Update campaign details if provided
     if (body.name || body.status) {
       const updateData: any = {
-        updated_at: new Date().toISOString(),
+        updated_at: getUTCTimeISO(),
       };
 
       if (body.name) updateData.name = body.name;
@@ -260,9 +263,10 @@ export async function PATCH(
 
     // 6. Update contacts if provided
     if (body.contacts && body.contacts.length > 0) {
+      console.log(`[API:campaigns] Updating ${body.contacts.length} contacts for campaign ${campaignId}`);
       for (const contact of body.contacts) {
         const contactUpdateData: any = {
-          updated_at: new Date().toISOString(),
+          updated_at: getUTCTimeISO(),
         };
 
         if (contact.emailSubject !== undefined) {
@@ -272,11 +276,19 @@ export async function PATCH(
           contactUpdateData.email_body = contact.emailBody;
         }
 
-        await supabase
+        const { error: contactUpdateError, count } = await supabase
           .from('campaign_contacts')
-          .update(contactUpdateData)
+          .update(contactUpdateData, { count: 'exact' })
           .eq('campaign_id', campaignId)
           .eq('contact_id', contact.id);
+
+        if (contactUpdateError) {
+          console.error(`[API:campaigns] Failed to update contact ${contact.id}:`, contactUpdateError);
+        } else if (count === 0) {
+          console.warn(`[API:campaigns] No rows updated for contact_id=${contact.id} in campaign ${campaignId}`);
+        } else {
+          console.log(`[API:campaigns] Updated contact ${contact.id}: subject="${(contact.emailSubject || '').substring(0, 30)}...", body=${(contact.emailBody || '').length} chars`);
+        }
       }
     }
 

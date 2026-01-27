@@ -9,7 +9,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { Search, Loader2, FolderOpen } from "lucide-react"
+import { Search, Loader2, FolderOpen, Plus } from "lucide-react"
 import Link from "next/link"
 
 interface Campaign {
@@ -73,7 +73,8 @@ export function CampaignTable() {
                     />
                 </div>
             </div>
-            <div className="flex-1 overflow-y-auto overscroll-contain">
+            {/* Desktop View */}
+            <div className="hidden md:block flex-1 overflow-y-auto overscroll-contain">
                 <Table>
                     <TableHeader className="sticky top-0 bg-white z-10">
                         <TableRow className="border-b border-gray-100">
@@ -137,7 +138,7 @@ export function CampaignTable() {
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="text-xs h-7 px-3 border-emerald-500 text-emerald-600 hover:bg-emerald-50 bg-transparent"
+                                                className="text-xs h-7 px-3 border-black text-black hover:bg-gray-50 bg-transparent"
                                             >
                                                 Manage
                                             </Button>
@@ -148,6 +149,40 @@ export function CampaignTable() {
                         )}
                     </TableBody>
                 </Table>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="block md:hidden flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50">
+                {isLoading ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                        <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                        <span className="text-sm">Loading campaigns...</span>
+                    </div>
+                ) : filteredCampaigns.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                        <div className="bg-white p-4 rounded-2xl mb-3 shadow-sm border border-gray-100">
+                            <FolderOpen className="w-8 h-8 text-gray-300" />
+                        </div>
+                        <p className="text-sm font-medium text-gray-900">No campaigns found</p>
+                    </div>
+                ) : (
+                    filteredCampaigns.map((campaign) => (
+                        <div key={campaign.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
+                            <div>
+                                <h4 className="font-semibold text-gray-900 text-sm mb-1">{campaign.name}</h4>
+                                <p className="text-xs text-gray-500">{formatDate(campaign.createdAt)}</p>
+                            </div>
+                            <Link href={`/campaigns/${campaign.id}`}>
+                                <Button
+                                    className="h-8 px-4 text-xs font-semibold text-black hover:opacity-90 border-0 shadow-none"
+                                    style={{ backgroundColor: "#c9f763" }}
+                                >
+                                    Manage
+                                </Button>
+                            </Link>
+                        </div>
+                    ))
+                )}
             </div>
         </div>
     )

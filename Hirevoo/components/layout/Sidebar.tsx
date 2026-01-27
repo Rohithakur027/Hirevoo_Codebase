@@ -28,7 +28,7 @@ const navItems = [
     { icon: Mail, label: "My Campaigns", href: "/campaigns" },
     { icon: FileText, label: "My Templates", href: "/templates" },
     { icon: Settings, label: "Settings", href: "/settings" },
-    { icon: UserIcon, label: "Profile", href: "/profile" },
+
 ]
 
 interface GmailStatusData {
@@ -37,7 +37,11 @@ interface GmailStatusData {
     email: string | null;
 }
 
-export function SideBar() {
+interface SideBarProps {
+    mobile?: boolean;
+}
+
+export function SideBar({ mobile = false }: SideBarProps) {
     const pathname = usePathname()
     const { collapsed, toggleCollapsed } = useSidebar()
     const { user, isLoading } = useSession()
@@ -128,11 +132,14 @@ export function SideBar() {
         await signOut({ callbackUrl: '/login' })
     }
 
+    const isCollapsed = mobile ? false : collapsed
+
     return (
         <aside
             className={cn(
-                "flex flex-col bg-white border-r border-gray-100 h-screen transition-all duration-300 relative flex-shrink-0",
-                collapsed ? "w-20" : "w-60"
+                "flex flex-col bg-white transition-all duration-300 relative flex-shrink-0",
+                mobile ? "w-full h-full border-none" : "border-r border-gray-100 h-screen",
+                !mobile && (isCollapsed ? "w-20" : "w-60")
             )}
         >
             {/* Logo */}
@@ -142,7 +149,7 @@ export function SideBar() {
                         <path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z" />
                     </svg>
                 </div>
-                {!collapsed && (
+                {!isCollapsed && (
                     <span className="text-xl font-semibold text-gray-800">Hirevoo</span>
                 )}
             </div>
@@ -157,7 +164,7 @@ export function SideBar() {
                                 <Link
                                     href={item.href}
                                     className={cn(
-                                        "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
+                                        "flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-colors",
                                         isActive
                                             ? "text-black"
                                             : "text-gray-600 hover:bg-gray-100"
@@ -165,7 +172,7 @@ export function SideBar() {
                                     style={isActive ? { backgroundColor: "#cef562" } : undefined}
                                 >
                                     <item.icon className="w-5 h-5 flex-shrink-0" />
-                                    {!collapsed && <span>{item.label}</span>}
+                                    {!isCollapsed && <span>{item.label}</span>}
                                 </Link>
                             </li>
                         )
@@ -183,7 +190,7 @@ export function SideBar() {
                         gmailStatus.isConnected
                             ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200"
                             : "bg-white hover:bg-gray-50 text-gray-700 border-gray-200",
-                        collapsed ? "justify-center px-2" : "justify-center"
+                        isCollapsed ? "justify-center px-2" : "justify-center"
                     )}
                 >
                     {gmailStatus.isConnected ? (
@@ -191,7 +198,7 @@ export function SideBar() {
                     ) : (
                         <Mail className="w-4 h-4 flex-shrink-0" />
                     )}
-                    {!collapsed && (
+                    {!isCollapsed && (
                         <span className="truncate">
                             {isDisconnecting
                                 ? 'Disconnecting...'
@@ -210,13 +217,13 @@ export function SideBar() {
             <div className="px-3 py-4 border-t border-gray-100 flex-shrink-0">
                 <div className={cn(
                     "flex items-center gap-3 mb-4",
-                    collapsed ? "justify-center" : ""
+                    isCollapsed ? "justify-center" : ""
                 )}>
                     <Avatar className="w-10 h-10">
                         <AvatarImage src={user?.avatar || "/placeholder.svg"} />
                         <AvatarFallback>{userInitials}</AvatarFallback>
                     </Avatar>
-                    {!collapsed && (
+                    {!isCollapsed && (
                         <div className="flex-1 min-w-0">
                             {isLoading ? (
                                 <div className="space-y-1">
@@ -228,7 +235,7 @@ export function SideBar() {
                         </div>
                     )}
                 </div>
-                {!collapsed && (
+                {!isCollapsed && (
                     <button
                         onClick={handleLogout}
                         className="flex items-center justify-center gap-2 w-full text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
@@ -239,17 +246,19 @@ export function SideBar() {
                 )}
             </div>
 
-            {/* Collapse Toggle */}
-            <button
-                onClick={toggleCollapsed}
-                className="absolute right-2 top-8 w-6 h-6 bg-gray-100 border border-gray-200 rounded-full flex items-center justify-center shadow-sm hover:bg-gray-200 z-50"
-            >
-                {collapsed ? (
-                    <ChevronRight className="w-4 h-4 text-gray-600" />
-                ) : (
-                    <ChevronLeft className="w-4 h-4 text-gray-600" />
-                )}
-            </button>
+            {/* Collapse Toggle - ONLY SHOW ON DESKTOP */}
+            {!mobile && (
+                <button
+                    onClick={toggleCollapsed}
+                    className="absolute right-2 top-8 w-6 h-6 bg-gray-100 border border-gray-200 rounded-full flex items-center justify-center shadow-sm hover:bg-gray-200 z-50"
+                >
+                    {isCollapsed ? (
+                        <ChevronRight className="w-4 h-4 text-gray-600" />
+                    ) : (
+                        <ChevronLeft className="w-4 h-4 text-gray-600" />
+                    )}
+                </button>
+            )}
 
             {/* Connect Gmail Modal */}
             <ConnectGmailModal

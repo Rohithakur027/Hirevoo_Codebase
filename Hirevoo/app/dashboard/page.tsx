@@ -6,6 +6,7 @@ import { SidebarProvider } from "@/context/SidebarContext"
 import { useRouter } from "next/navigation"
 
 import { SideBar } from "@/components/layout"
+import { BottomNav } from "@/components/layout/BottomNav"
 import { CampaignTable } from "@/components/dashboard/CampaignTable"
 import { RecentActivity } from "@/components/dashboard/RecentActivity"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -103,9 +104,12 @@ export default function Dashboard() {
 
     return (
         <SidebarProvider>
-            <div className="flex h-screen bg-gray-50 overflow-hidden">
-                {/* Left Sidebar */}
-                <SideBar />
+            <div className="flex min-h-screen md:h-screen bg-gray-50 overflow-auto md:overflow-hidden flex-col md:flex-row pb-[60px] md:pb-0">
+
+                {/* Left Sidebar - Desktop */}
+                <div className="hidden md:block">
+                    <SideBar />
+                </div>
 
                 {/* Main Content Area - Two Column Layout */}
                 <div className="flex-1 flex flex-col overflow-hidden">
@@ -126,7 +130,7 @@ export default function Dashboard() {
                     )}
 
                     {/* Header - Slimmer & Unified */}
-                    <header className="flex items-start justify-between px-8 pt-4 pb-4 bg-gray-50 flex-shrink-0">
+                    <header className="flex items-start justify-between px-4 md:px-8 py-2 bg-gray-50 flex-shrink-0">
                         <div className="pt-1">
                             <h1 className="text-2xl font-bold text-gray-900 tracking-tight leading-none">Dashboard</h1>
                             <p className="text-sm text-gray-500 font-medium mt-1">
@@ -154,7 +158,7 @@ export default function Dashboard() {
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <button className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                                            <div className="text-right">
+                                            <div className="text-right hidden md:block">
                                                 {isLoadingSession ? (
                                                     <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
                                                 ) : (
@@ -188,13 +192,13 @@ export default function Dashboard() {
                     </header>
 
                     {/* Two Column Content */}
-                    <div className="flex-1 flex overflow-hidden">
+                    <div className="flex-1 flex flex-col md:flex-row overflow-auto md:overflow-hidden">
                         {/* Column 1 - Primary Content */}
-                        <main className="flex-1 flex flex-col overflow-hidden px-8 pb-8 pt-2 gap-6">
+                        <main className="flex-1 flex flex-col overflow-visible md:overflow-hidden px-4 md:px-8 pb-8 pt-2 gap-4">
                             {/* Stats Cards Row - converted to grid */}
-                            <div className="grid grid-cols-3 gap-6 flex-shrink-0">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-shrink-0">
                                 {/* Total Outreach Card */}
-                                <div className="rounded-[16px] p-4 h-[155px] flex flex-col justify-between" style={{ backgroundColor: "#cec4ff" }}>
+                                <div className="rounded-[16px] p-4 h-[125px] flex flex-col justify-between" style={{ backgroundColor: "#cec4ff" }}>
                                     <div className="flex items-center gap-2">
                                         <div className="w-6 h-6 bg-white/30 rounded-md flex items-center justify-center">
                                             <Mail className="w-3 h-3 text-violet-700" />
@@ -218,7 +222,7 @@ export default function Dashboard() {
                                 </div>
 
                                 {/* Total Opened Card */}
-                                <div className="rounded-[16px] p-4 h-[155px] flex flex-col justify-between" style={{ backgroundColor: "#aac9ff" }}>
+                                <div className="rounded-[16px] p-4 h-[125px] flex flex-col justify-between" style={{ backgroundColor: "#aac9ff" }}>
                                     <div className="flex items-center gap-2">
                                         <div className="w-6 h-6 bg-white/30 rounded-md flex items-center justify-center">
                                             <TrendingUp className="w-3 h-3 text-emerald-700" />
@@ -242,7 +246,7 @@ export default function Dashboard() {
                                 </div>
 
                                 {/* Total Replied Card */}
-                                <div className="rounded-[16px] p-4 h-[155px] flex flex-col justify-between" style={{ backgroundColor: "#93e4b9" }}>
+                                <div className="rounded-[16px] p-4 h-[125px] flex flex-col justify-between" style={{ backgroundColor: "#93e4b9" }}>
                                     <div className="flex items-center gap-2">
                                         <div className="w-6 h-6 bg-white/30 rounded-md flex items-center justify-center">
                                             <MessageSquare className="w-3 h-3 text-amber-700" />
@@ -264,10 +268,15 @@ export default function Dashboard() {
                                 </div>
                             </div>
 
+                            {/* Mobile Only: Recent Activity (Moved from Sidebar) */}
+                            <div className="block md:hidden mb-6">
+                                <RecentActivity />
+                            </div>
+
                             {/* Chart Section & More Analysis - Grid Row */}
-                            <div className="grid grid-cols-3 gap-6 flex-shrink-0 h-[150px]">
-                                {/* Regular Sell Chart - Spans 2 columns */}
-                                <div className="col-span-2 bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex flex-col">
+                            <div className="flex flex-col md:grid md:grid-cols-3 gap-4 flex-shrink-0 min-h-[150px]">
+                                {/* Regular Sell Chart - Spans 2 columns - Hidden on Mobile */}
+                                <div className="hidden md:flex col-span-2 bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex-col h-full min-h-[140px]">
                                     <div className="flex items-center justify-between mb-2">
                                         <h3 className="text-sm font-semibold text-gray-800">Regular Sell</h3>
                                         <Button variant="outline" className="text-xs bg-transparent border-emerald-500 text-emerald-500 hover:bg-emerald-50 rounded-lg px-3 h-7">
@@ -310,22 +319,19 @@ export default function Dashboard() {
                                 </div>
 
                                 {/* Create Campaign Section - Replaces More Analysis */}
-                                <div className="col-span-1 pl-4 flex flex-col justify-between h-full">
-                                    <div className="bg-white rounded-[16px] p-4 shadow-sm border border-gray-100 h-full flex flex-col justify-between">
+                                <div className="col-span-1 md:pl-4 flex flex-col justify-between h-full">
+                                    <div className="bg-white rounded-[16px] p-4 shadow-sm border border-gray-100 h-full flex flex-col justify-between min-h-[140px]">
                                         <div>
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Sparkles className="w-4 h-4 text-emerald-500" />
-                                                <h3 className="text-sm font-semibold text-gray-800">Create Campaign</h3>
-                                            </div>
-                                            <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-                                                Do your daily task to send emails — you&apos;re just one step away from your dream job.
+                                            <h4 className="text-lg font-bold text-gray-800 mb-1">Let&apos;s get you hired.</h4>
+                                            <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+                                                Create a new outreach campaign to land your dream job.
                                             </p>
                                         </div>
                                         <Button
-                                            className="text-xs font-medium rounded-[6px] text-white bg-black hover:bg-gray-800 h-8 px-3 w-fit"
+                                            className="text-xs font-medium rounded-[8px] text-white bg-black hover:bg-gray-800 h-9 px-4 w-full flex items-center justify-center"
                                             onClick={() => router.push('/campaigns/upload')}
                                         >
-                                            <Plus className="w-3.5 h-3.5 mr-0.8" />
+                                            <Plus className="w-4 h-4 mr-2" />
                                             Create New Campaign
                                         </Button>
                                     </div>
@@ -333,17 +339,20 @@ export default function Dashboard() {
                             </div>
 
                             {/* Campaign Table - Expanded */}
-                            <div className="flex-1 min-h-0">
+                            <div className="flex-1 min-h-[400px] md:min-h-0">
                                 <CampaignTable />
                             </div>
                         </main>
 
                         {/* Column 2 - Right Sidebar */}
-                        <aside className="w-[300px] flex flex-col overflow-hidden flex-shrink-0 pt-2 pr-8 pb-8 pl-0 gap-4">
+                        <aside className="hidden md:flex w-full md:w-[300px] flex-col overflow-visible md:overflow-hidden flex-shrink-0 pt-2 md:pr-8 pb-8 px-4 md:pl-0 gap-4">
                             <RecentActivity />
                         </aside>
                     </div>
                 </div>
+
+                {/* Mobile Bottom Navigation */}
+                <BottomNav />
             </div>
         </SidebarProvider>
     )

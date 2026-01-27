@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabase } from "@/lib/supabase/supabase";
+import { decrypt } from "@/lib/encryption";
+import { getUTCTimeISO } from "@/lib/date-helpers";
 
 export async function POST() {
     console.log("[Gmail Disconnect] Starting disconnect process");
@@ -23,7 +25,7 @@ export async function POST() {
 
         const { data: user, error: userError } = await supabase
             .from('users')
-            .select('id, email, gmail_access_token, gmail_refresh_token')
+            .select('id, email, gmail_refresh_token_IV, gmail_refresh_token_content, gmail_refresh_token_tag')
             .eq('email', session.user.email)
             .single();
 
@@ -31,6 +33,7 @@ export async function POST() {
             userFound: !!user,
             userId: user?.id,
             userEmail: user?.email,
+            hasEncryptedToken: !!(user?.gmail_refresh_token_content),
             error: userError?.message,
             errorCode: userError?.code,
             errorDetails: userError?.details
@@ -44,15 +47,18 @@ export async function POST() {
             );
         }
 
-        // 2. Revoke token at Google (if we have a token to revoke)
-        if (user.gmail_access_token || user.gmail_refresh_token) {
+        // 2. Revoke token at Google (if we have an encrypted token to decrypt and revoke)
+        if (user.gmail_refresh_token_content && user.gmail_refresh_token_IV && user.gmail_refresh_token_tag) {
             try {
-                console.log("[Gmail Disconnect] Revoking token at Google...");
-                console.log("[Gmail Disconnect] Has access token:", !!user.gmail_access_token);
-                console.log("[Gmail Disconnect] Has refresh token:", !!user.gmail_refresh_token);
+                console.log("[Gmail Disconnect] Decrypting refresh token for revocation...");
 
-                const tokenToRevoke = user.gmail_access_token || user.gmail_refresh_token;
-                console.log("[Gmail Disconnect] Revoking token:", tokenToRevoke ? "present" : "missing");
+                const refreshToken = decrypt({
+                    salt: user.gmail_refresh_token_IV,
+                    content: user.gmail_refresh_token_content,
+                    tag: user.gmail_refresh_token_tag
+                });
+
+                console.log("[Gmail Disconnect] Revoking token at Google...");
 
                 const revokeResponse = await fetch('https://oauth2.googleapis.com/revoke', {
                     method: 'POST',
@@ -60,7 +66,7 @@ export async function POST() {
                         'Content-Type': 'application/x-www-form-urlencoded',
                     },
                     body: new URLSearchParams({
-                        token: tokenToRevoke,
+                        token: refreshToken,
                     }),
                 });
 
@@ -69,17 +75,15 @@ export async function POST() {
                 if (revokeResponse.ok) {
                     console.log("[Gmail Disconnect] Token successfully revoked at Google");
                 } else {
-                    // Token might already be invalid, which is fine
                     console.log("[Gmail Disconnect] Token revocation failed with status:", revokeResponse.status);
                     const errorText = await revokeResponse.text().catch(() => 'Unknown error');
                     console.log("[Gmail Disconnect] Revoke error:", errorText);
                 }
             } catch (error) {
-                // Log but don't fail - revocation might not be critical
                 console.warn("[Gmail Disconnect] Failed to revoke token at Google:", error);
             }
         } else {
-            console.log("[Gmail Disconnect] No tokens found to revoke");
+            console.log("[Gmail Disconnect] No encrypted tokens found to revoke");
         }
 
         // 3. Clean up database regardless of Google revocation result
@@ -87,10 +91,11 @@ export async function POST() {
 
         const updateData = {
             gmail_connected: false,
-            gmail_access_token: null,
-            gmail_refresh_token: null,
-            gmail_token_expires_at: null,
-            updated_at: new Date().toISOString(),
+            gmail_refresh_token_IV: null,
+            gmail_refresh_token_content: null,
+            gmail_refresh_token_tag: null,
+            gmail_permission_level: null,
+            updated_at: getUTCTimeISO(),
         };
 
         console.log("[Gmail Disconnect] Update data:", updateData);

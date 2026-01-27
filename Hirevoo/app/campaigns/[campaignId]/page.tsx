@@ -23,6 +23,7 @@ interface Contact {
     emailBody: string;
     sentAt?: string;
     error?: string;
+    gmailThreadId?: string;
 }
 
 interface Campaign {
@@ -97,12 +98,14 @@ export default function CampaignPage({ params }: { params: Promise<{ campaignId:
     // Map contacts to Recipient format for the table
     const mappedRecipients: Recipient[] = campaign.contacts.map(c => ({
         id: c.id,
+        campaignContactId: (c as any).campaignContactId,
         name: c.name || '',
         email: c.email || '',
         status: (c.emailStatus === 'done' || (c as any).status === 'sent') ? 'Sent' : 'Pending',
         sentAt: c.sentAt || campaign.sentAt || campaign.createdAt || new Date().toISOString(),
         avatar: "/placeholder.svg",
-        initials: (c.name || c.email || "?").substring(0, 2).toUpperCase()
+        initials: (c.name || c.email || "?").substring(0, 2).toUpperCase(),
+        gmailThreadId: c.gmailThreadId
     }));
 
     const formatNumber = (num: number) => {
@@ -113,7 +116,7 @@ export default function CampaignPage({ params }: { params: Promise<{ campaignId:
     return (
         <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
             {/* Header */}
-            <header className="flex items-center gap-4 px-8 pt-6 pb-6 flex-shrink-0">
+            <header className="flex items-center gap-4 px-4 md:px-8 pt-6 pb-6 flex-shrink-0">
                 <Link href="/campaigns" className="text-gray-400 hover:text-gray-600 transition-colors">
                     <ArrowLeft className="w-5 h-5" />
                 </Link>
@@ -124,12 +127,12 @@ export default function CampaignPage({ params }: { params: Promise<{ campaignId:
             </header>
 
             {/* Main Content Area - Fixed Height Container */}
-            <div className="flex-1 flex overflow-hidden px-8 pb-8 gap-6">
+            <div className="flex-1 flex flex-col md:flex-row overflow-auto md:overflow-hidden px-4 md:px-8 pb-8 gap-6">
 
                 {/* Left Column - Stats & Table */}
-                <main className="flex-1 flex flex-col overflow-hidden gap-6">
+                <main className="flex-1 flex flex-col overflow-visible md:overflow-hidden gap-6">
                     {/* Stats Cards */}
-                    <div className="grid grid-cols-3 gap-6 flex-shrink-0">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-shrink-0">
                         {/* Total Outreach Card */}
                         <div className="rounded-[16px] p-4 h-[155px] flex flex-col justify-between" style={{ backgroundColor: "#cec4ff" }}>
                             <div className="flex items-center gap-2">
@@ -198,13 +201,13 @@ export default function CampaignPage({ params }: { params: Promise<{ campaignId:
                     </div>
 
                     {/* Recipient Table - Flex Grow & Scrollable */}
-                    <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="flex-1 min-h-[400px] md:min-h-0 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                         <RecipientTable recipients={mappedRecipients} />
                     </div>
                 </main>
 
                 {/* Right Sidebar - Recent Activity */}
-                <aside className="w-[300px] flex-shrink-0 flex flex-col overflow-hidden h-full">
+                <aside className="w-full md:w-[300px] flex-shrink-0 flex flex-col overflow-hidden h-auto md:h-full">
                     <RecentActivity />
                 </aside>
             </div>

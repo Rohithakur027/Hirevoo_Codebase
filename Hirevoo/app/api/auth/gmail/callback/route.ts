@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { gmailClient } from '@/lib/gmail/client';
 import { createClient } from '@supabase/supabase-js';
+import { google } from 'googleapis';
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { encrypt } from "@/lib/encryption";
+import { getUTCTimeISO } from "@/lib/date-helpers";
 
 // Create a Supabase client with service role key for admin operations
 const supabase = createClient(
@@ -15,7 +17,9 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const error = searchParams.get('error');
-    const state = searchParams.get('state'); // Contains userId:permissionLevel
+    const state = searchParams.get('state');
+
+    console.log("[Gmail Callback] Init:", { code: !!code, error, state });
 
     if (error) {
         return NextResponse.redirect(new URL(`/settings?error=${error}`, request.url));
@@ -82,38 +86,57 @@ export async function GET(request: NextRequest) {
         // Prepare update data
         const updateData: any = { // Use any to bypass strict type checking for new columns
             gmail_connected: true,
-            gmail_access_token: tokens.access_token,
-            gmail_token_expires_at: expiresAt,
             gmail_permission_level: permissionLevel,
-            updated_at: new Date().toISOString(),
+            updated_at: getUTCTimeISO(),
         };
 
         // Only update refresh token if we received a new one (Google doesn't always send it)
         if (tokens.refresh_token) {
-            updateData.gmail_refresh_token_salt = encryptedToken.salt;
+            updateData.gmail_refresh_token_IV = encryptedToken.salt;
             updateData.gmail_refresh_token_content = encryptedToken.content;
             updateData.gmail_refresh_token_tag = encryptedToken.tag;
-            // Clear old column if it exists/is allocated
-            updateData.gmail_refresh_token = null;
         }
 
         let updateError;
+        let updatedRows = 0;
 
         // Try to update by ID first if available (most reliable)
-        if ((session.user as any).id) {
-            const { error } = await supabase
+        const userId = (session.user as any).id;
+        if (userId) {
+            // First verify the user exists in the DB
+            const { data: existingUser, error: lookupError } = await supabase
+                .from('users')
+                .select('id, email, gmail_connected')
+                .eq('id', userId)
+                .single();
+
+            console.log('[Gmail Callback] User lookup by ID:', { userId, existingUser, lookupError });
+
+            if (existingUser) {
+                const { error, data } = await supabase
+                    .from('users')
+                    .update(updateData)
+                    .eq('id', userId)
+                    .select();
+                updateError = error;
+                updatedRows = data?.length || 0;
+                console.log('[Gmail Callback] Update by ID result:', { error, updatedRows, data });
+            } else {
+                console.warn('[Gmail Callback] No user found with ID:', userId, '— trying email fallback');
+            }
+        }
+
+        // Fallback to email if ID update didn't work
+        if (updatedRows === 0) {
+            console.log('[Gmail Callback] Falling back to email update for:', userEmail);
+            const { error, data } = await supabase
                 .from('users')
                 .update(updateData)
-                .eq('id', (session.user as any).id);
+                .eq('email', userEmail)
+                .select();
             updateError = error;
-        } else {
-            // Fallback to email
-            console.log('[Gmail Callback] No user ID in session, falling back to email update');
-            const { error } = await supabase
-                .from('users')
-                .update(updateData)
-                .eq('email', userEmail);
-            updateError = error;
+            updatedRows = data?.length || 0;
+            console.log('[Gmail Callback] Update by email result:', { error, updatedRows, data });
         }
 
         if (updateError) {
@@ -121,7 +144,80 @@ export async function GET(request: NextRequest) {
             return NextResponse.redirect(new URL('/settings?error=database_error', request.url));
         }
 
-        console.log('[Gmail Callback] Database update successful');
+        if (updatedRows === 0) {
+            console.error('[Gmail Callback] No rows updated! User not found by ID or email. userId:', userId, 'email:', userEmail);
+            return NextResponse.redirect(new URL('/settings?error=user_not_found', request.url));
+        }
+
+        // Verify the update actually persisted
+        const { data: verifyUser } = await supabase
+            .from('users')
+            .select('id, gmail_connected, gmail_permission_level')
+            .eq('email', userEmail)
+            .single();
+        console.log('[Gmail Callback] Verification read after update:', verifyUser);
+
+        console.log('[Gmail Callback] Database update successful, rows updated:', updatedRows);
+
+        // ── Start Gmail Push Notifications (Watch) ──────────────────────
+        // Uses the fresh tokens to subscribe to inbox changes via Pub/Sub.
+        // Non-blocking: if this fails, the user is still connected — they
+        // just won't get real-time reply tracking until the watch is set up.
+        if (permissionLevel === 'FULL_ACCESS') {
+            try {
+                const topicName = process.env.GMAIL_TOPIC_NAME;
+                if (!topicName) {
+                    console.warn('[Gmail Callback] GMAIL_TOPIC_NAME not set — skipping watch setup.');
+                } else {
+                    const oauth2Client = new google.auth.OAuth2(
+                        process.env.GOOGLE_CLIENT_ID,
+                        process.env.GOOGLE_CLIENT_SECRET
+                    );
+                    oauth2Client.setCredentials({
+                        access_token: tokens.access_token,
+                        refresh_token: tokens.refresh_token,
+                    });
+
+                    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+                    const watchResponse = await gmail.users.watch({
+                        userId: 'me',
+                        requestBody: {
+                            topicName,
+                            labelIds: ['INBOX'],
+                        },
+                    });
+
+                    const watchExpiration = watchResponse.data.expiration;
+                    const watchHistoryId = watchResponse.data.historyId;
+
+                    console.log('[Gmail Callback] Watch started:', {
+                        expiration: watchExpiration,
+                        historyId: watchHistoryId,
+                    });
+
+                    // Save the watch expiration so we can renew before it expires
+                    const resolvedUserId = userId || verifyUser?.id;
+                    if (resolvedUserId && watchExpiration) {
+                        await supabase
+                            .from('users')
+                            .update({
+                                gmail_watch_expiration: new Date(Number(watchExpiration)).toISOString(),
+                                gmail_history_id: watchHistoryId,
+                                updated_at: getUTCTimeISO(),
+                            })
+                            .eq('id', resolvedUserId);
+
+                        console.log('[Gmail Callback] Watch expiration saved for user:', resolvedUserId);
+                    }
+                }
+            } catch (watchError) {
+                // Do NOT fail the auth flow — the user is connected, just without live notifications
+                console.error('[Gmail Callback] Watch setup failed (non-fatal):', watchError);
+            }
+        } else {
+            console.log('[Gmail Callback] SEND_ONLY permission — skipping watch (no read scope).');
+        }
 
         return NextResponse.redirect(new URL('/settings?success=gmail_connected', request.url));
 

@@ -1,10 +1,11 @@
 'use client';
 
 import { SideBar } from '@/components/layout';
+import { BottomNav } from '@/components/layout/BottomNav';
 import { SidebarProvider } from '@/context/SidebarContext';
 import { useSession } from '@/app/hooks/use-session';
 import { useState, useEffect } from 'react';
-import { Mail, Shield, CheckCircle, XCircle, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Mail, Shield, CheckCircle, XCircle, Loader2, AlertCircle, RefreshCw, Lock, Check, ChevronRight } from 'lucide-react';
 import ConnectGmailModal, { PermissionLevel } from '@/components/dashboard/ConnectGmailModal';
 
 interface GmailStatusData {
@@ -171,16 +172,18 @@ export default function SettingsPage() {
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "#f0f4f5" }}>
+      <div className="flex h-screen overflow-hidden pb-[60px] md:pb-0" style={{ backgroundColor: "#fafafa" }}>
         {/* Left Sidebar */}
-        <SideBar />
+        <div className="hidden md:block">
+          <SideBar />
+        </div>
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Header */}
-          <header className="flex items-center justify-between px-10 py-3 flex-shrink-0">
+          <header className="flex items-center justify-between px-8 py-4 flex-shrink-0">
             <div>
-              <h1 className="text-lg font-semibold text-gray-800">Settings</h1>
+              <h1 className="text-xl font-bold text-gray-900">Settings</h1>
             </div>
             <div className="flex items-center gap-4">
               <div className="pl-4">
@@ -189,11 +192,11 @@ export default function SettingsPage() {
                     {isLoading ? (
                       <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
                     ) : (
-                      <p className="text-sm font-medium text-gray-800">{user?.name || "Guest User"}</p>
+                      <p className="text-sm font-bold text-gray-800 tracking-wide">{user?.name?.toUpperCase() || "GUEST USER"}</p>
                     )}
                   </div>
-                  <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
-                    <span className="text-xs font-medium text-gray-600">{userInitials}</span>
+                  <div className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center border border-gray-200">
+                    <span className="text-xs font-bold text-gray-600">{userInitials}</span>
                   </div>
                 </div>
               </div>
@@ -201,23 +204,22 @@ export default function SettingsPage() {
           </header>
 
           {/* Main Content */}
-          <main className="flex-1 overflow-y-auto p-10">
-            <div className="max-w-4xl">
-              <h2 className="text-2xl font-bold mb-6">Settings</h2>
+          <main className="flex-1 overflow-y-auto p-8">
+            <div className="max-w-3xl mx-auto space-y-6">
 
               {/* Success Message */}
               {successMessage && (
-                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
                   <CheckCircle className="w-5 h-5 text-green-600" />
-                  <span className="text-green-800">{successMessage}</span>
+                  <span className="text-sm font-medium text-green-800">{successMessage}</span>
                 </div>
               )}
 
               {/* Error Message */}
               {error && (
-                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
                   <AlertCircle className="w-5 h-5 text-red-600" />
-                  <span className="text-red-800">{error}</span>
+                  <span className="text-sm font-medium text-red-800">{error}</span>
                   <button
                     onClick={() => setError(null)}
                     className="ml-auto text-red-600 hover:text-red-800"
@@ -227,186 +229,148 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* Gmail Integration Section */}
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="p-6 border-b border-gray-100">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-red-100 p-2 rounded-lg">
-                      <Mail className="w-6 h-6 text-red-600" />
+              {/* Integrations Card */}
+              <section>
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900">Integrations</h2>
+                  <p className="text-sm text-gray-500">Manage your connected apps and services</p>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm transition-all hover:shadow-md">
+                  {/* Card Header */}
+                  <div className="p-6 border-b border-gray-50 flex items-start justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="bg-blue-50 p-2.5 rounded-lg border border-blue-100">
+                        <Mail className="w-6 h-6 text-blue-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold text-gray-900">Gmail</h3>
+                        <p className="text-sm text-gray-500">Send emails directly from your account</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">Gmail Integration</h3>
-                      <p className="text-sm text-gray-600">Connect your Gmail account to send email campaigns</p>
-                    </div>
+
+                    {/* Status Indicator */}
                     <button
                       onClick={fetchGmailStatus}
                       disabled={isGmailLoading}
-                      className="ml-auto p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                      className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-50 transition-colors"
                       title="Refresh status"
                     >
                       <RefreshCw className={`w-4 h-4 ${isGmailLoading ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
-                </div>
 
-                <div className="p-6">
-                  {isGmailLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-                      <span className="ml-2 text-gray-500">Checking Gmail status...</span>
-                    </div>
-                  ) : gmailStatus.isConnected ? (
-                    /* Connected State */
-                    <div className="space-y-6">
-                      {/* Connection Status */}
-                      <div className="flex items-center gap-3 p-4 bg-green-50 rounded-lg border border-green-200">
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                        <div className="flex-1">
-                          <p className="font-medium text-green-800">Gmail Connected</p>
-                          <p className="text-sm text-green-700">Your Gmail account is connected and ready to send campaigns</p>
-                        </div>
+                  <div className="p-6">
+                    {isGmailLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 animate-spin text-gray-300" />
                       </div>
-
-                      {/* Account Details */}
-                      <div className="grid gap-4 md:grid-cols-2">
-                        {/* Connected Email */}
-                        <div className="p-4 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-500 mb-1">Connected Account</p>
-                          <p className="font-medium text-gray-900">
-                            {gmailStatus.email || 'Email not available'}
-                          </p>
-                        </div>
-
-                        {/* Permission Level */}
-                        <div className="p-4 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-500 mb-1">Permission Level</p>
-                          <div className="flex items-center gap-2">
-                            <Shield className="w-4 h-4 text-gray-600" />
-                            <span className="font-medium text-gray-900">
-                              {getPermissionLevelDisplay(gmailStatus.permissionLevel).label}
+                    ) : gmailStatus.isConnected ? (
+                      <div className="space-y-6">
+                        {/* Connection Status Badge */}
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 rounded-full border border-green-100 w-fit">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                             </span>
+                            <span className="text-xs font-semibold uppercase tracking-wide">Active</span>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {getPermissionLevelDisplay(gmailStatus.permissionLevel).description}
-                          </p>
+
+                          {/* Permissions Badge */}
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-full border border-gray-200 text-xs font-medium">
+                            <Shield className="w-3 h-3" />
+                            {getPermissionLevelDisplay(gmailStatus.permissionLevel).label}
+                          </div>
+                        </div>
+
+                        {/* Account Info Box */}
+                        <div className="p-4 bg-gray-50 rounded-lg border border-gray-100 grid grid-cols-1 gap-1">
+                          <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Connected Account</span>
+                          <span className="text-sm font-medium text-gray-900 font-mono">{gmailStatus.email}</span>
+                        </div>
+
+                        {/* Security Verified */}
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                          <Lock className="w-3.5 h-3.5 text-blue-500" />
+                          <span className="text-xs">
+                            Credentials are <span className="font-medium text-gray-700">end-to-end encrypted</span>.
+                          </span>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="pt-4 mt-2 border-t border-gray-50 flex items-center justify-between">
+                          <button
+                            onClick={() => setShowConnectModal(true)}
+                            className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                          >
+                            Manage Permissions
+                          </button>
+
+                          <button
+                            onClick={handleDisconnectGmail}
+                            disabled={isDisconnecting}
+                            className="text-sm font-medium text-red-500 hover:text-red-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                          >
+                            {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
+                          </button>
                         </div>
                       </div>
-
-                      {/* Security Note */}
-                      <div className="flex items-start gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                        <Shield className="w-5 h-5 text-blue-600 mt-0.5" />
-                        <div>
-                          <p className="font-medium text-blue-800">Secure Connection</p>
-                          <p className="text-sm text-blue-700">
-                            Your Gmail credentials are encrypted and stored securely. We never store your Gmail password.
-                            Tokens are automatically refreshed when needed.
-                          </p>
+                    ) : (
+                      /* Not Connected State */
+                      <div className="space-y-6">
+                        <div className="bg-amber-50 p-4 rounded-lg border border-amber-100 flex gap-3">
+                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                          <div className="text-sm">
+                            <p className="font-medium text-amber-800">No account connected</p>
+                            <p className="text-amber-700 mt-1">Connect your Gmail to verify your identity and start sending campaigns.</p>
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-4 pt-4 border-t border-gray-100">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="flex items-start gap-2">
+                            <Check className="w-4 h-4 text-gray-400 mt-0.5" />
+                            <span className="text-sm text-gray-600">Personalized sending</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <Check className="w-4 h-4 text-gray-400 mt-0.5" />
+                            <span className="text-sm text-gray-600">Automated follow-ups</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <Check className="w-4 h-4 text-gray-400 mt-0.5" />
+                            <span className="text-sm text-gray-600">Secure OAuth 2.0</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <Check className="w-4 h-4 text-gray-400 mt-0.5" />
+                            <span className="text-sm text-gray-600">Real-time tracking</span>
+                          </div>
+                        </div>
+
                         <button
                           onClick={() => setShowConnectModal(true)}
-                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                          disabled={isConnecting}
+                          className="w-full px-4 py-2.5 text-white font-semibold bg-gray-900 hover:bg-black rounded-lg transition-colors disabled:opacity-70 flex items-center justify-center gap-2 shadow-sm"
                         >
-                          Change Permission Level
-                        </button>
-                        <button
-                          onClick={handleDisconnectGmail}
-                          disabled={isDisconnecting}
-                          className="px-4 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                          {isDisconnecting ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              Disconnecting...
-                            </>
+                          {isConnecting ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
                           ) : (
-                            'Disconnect Gmail'
+                            <>
+                              Connect Gmail
+                              <ChevronRight className="w-4 h-4 opacity-50" />
+                            </>
                           )}
                         </button>
                       </div>
-                    </div>
-                  ) : (
-                    /* Not Connected State */
-                    <div className="space-y-6">
-                      {/* Status */}
-                      <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-lg border border-amber-200">
-                        <AlertCircle className="w-5 h-5 text-amber-600" />
-                        <div className="flex-1">
-                          <p className="font-medium text-amber-800">Gmail Not Connected</p>
-                          <p className="text-sm text-amber-700">Connect your Gmail account to start sending email campaigns</p>
-                        </div>
-                      </div>
-
-                      {/* Benefits */}
-                      <div className="p-4 bg-gray-50 rounded-lg">
-                        <p className="font-medium text-gray-900 mb-3">Why connect Gmail?</p>
-                        <ul className="space-y-2 text-sm text-gray-600">
-                          <li className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                            Send personalized email campaigns directly from your Gmail
-                          </li>
-                          <li className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                            Better email deliverability using your own domain reputation
-                          </li>
-                          <li className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                            Emails appear in your Sent folder for easy tracking
-                          </li>
-                          <li className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                            Secure OAuth 2.0 authentication (we never see your password)
-                          </li>
-                        </ul>
-                      </div>
-
-                      {/* Connect Button */}
-                      <button
-                        onClick={() => setShowConnectModal(true)}
-                        disabled={isConnecting}
-                        className="w-full px-6 py-3 text-white font-medium bg-black hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        {isConnecting ? (
-                          <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            Connecting...
-                          </>
-                        ) : (
-                          <>
-                            <Mail className="w-5 h-5" />
-                            Connect Gmail Account
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Account Section */}
-              <div className="mt-8 bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="p-6 border-b border-gray-100">
-                  <h3 className="text-lg font-semibold text-gray-900">Account Information</h3>
-                </div>
-                <div className="p-6">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="p-4 bg-gray-50 rounded-lg">
-                      <p className="text-sm text-gray-500 mb-1">Name</p>
-                      <p className="font-medium text-gray-900">{user?.name || 'Not available'}</p>
-                    </div>
-                    <div className="p-4 bg-gray-50 rounded-lg">
-                      <p className="text-sm text-gray-500 mb-1">Email</p>
-                      <p className="font-medium text-gray-900">{user?.email || 'Not available'}</p>
-                    </div>
+                    )}
                   </div>
                 </div>
-              </div>
+              </section>
+
+
             </div>
           </main>
         </div>
+        <BottomNav />
 
         {/* Connect Gmail Modal */}
         <ConnectGmailModal

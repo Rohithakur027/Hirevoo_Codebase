@@ -1,29 +1,12 @@
 /**
- * workers/jobs/send-campaign.ts
+ * Core business logic for processing email campaigns.
+ * Handles fetching emails, sending via Gmail, updating DB, and publishing events.
  *
- * Purpose: Core business logic for processing email campaigns
- *
- * This is the heart of the background worker system. When a job is picked
- * up from the queue, this function handles:
- * - Fetching pending emails from the database
- * - Sending each email via Gmail API
- * - Updating database records (per email and campaign-level)
- * - Publishing real-time progress updates via Redis Pub/Sub
- * - Creating activity records for audit trail
- * - Comprehensive error handling and recovery
- *
- * Key Design Decisions:
- * 1. IDEMPOTENT: Safe to retry - only processes emails with status='pending'
- * 2. RESILIENT: Individual email failures don't stop the campaign
- * 3. OBSERVABLE: Every step publishes events for real-time monitoring
- * 4. EFFICIENT: Processes in batches to manage memory for large campaigns
- *
- * Flow:
- * ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
- * │ Fetch        │ → │ Send Each    │ → │ Update       │
- * │ Pending      │    │ Email via    │    │ Database &   │
- * │ Emails       │    │ Gmail API    │    │ Publish      │
- * └──────────────┘    └──────────────┘    └──────────────┘
+ * Key Design:
+ * 1. Idempotent: Safe to retry.
+ * 2. Resilient: Individual failures don't stop campaign.
+ * 3. Observable: Real-time progress events.
+ * 4. Efficient: Batched processing.
  *
  * @module workers/jobs/send-campaign
  */
@@ -32,6 +15,7 @@ import { Job } from 'bullmq';
 import { createClient } from '@supabase/supabase-js';
 import { sendEmail, delay } from '../../lib/services/email-service';
 import { createRedisConnection } from '../../lib/queue/config';
+import { appendTrackingPixel } from '../../lib/tracking';
 import type { SendCampaignJobData, SendCampaignJobResult } from '../../lib/queue/email-queue';
 
 // ============================================================
@@ -100,9 +84,7 @@ interface EmailFailedEvent {
 
 /**
  * Supabase client for database operations.
- *
- * Uses service role key to bypass RLS (Row Level Security) since
- * the worker runs server-side and needs full access.
+ * Uses service role key to bypass RLS.
  */
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -115,10 +97,7 @@ const supabase = createClient(
 
 /**
  * Dedicated Redis connection for publishing events.
- *
- * We use a separate connection because:
- * 1. The main connection is used by BullMQ for job management
- * 2. Publishing is a non-blocking operation that shouldn't interfere
+ * Separate connection avoids blocking the main BullMQ connection.
  */
 const publisherRedis = createRedisConnection('worker-publisher');
 
@@ -126,17 +105,65 @@ const publisherRedis = createRedisConnection('worker-publisher');
 // REDIS COMMAND OPTIMIZATION SETTINGS
 // ============================================================
 
-/**
- * Batch size for progress updates to reduce Redis commands.
- * Instead of updating progress after every email, we batch updates.
- */
-const PROGRESS_UPDATE_INTERVAL = 10; // Update progress every N emails
+// Update progress every N emails
+const PROGRESS_UPDATE_INTERVAL = 10;
+
+// Publish event every N emails
+const PUBSUB_BATCH_INTERVAL = 5;
+
+// ============================================================
+// VARIABLE REPLACEMENT
+// ============================================================
 
 /**
- * Batch size for Pub/Sub events to reduce Redis commands.
- * Instead of publishing after every email, we batch publish.
+ * Converts plain text to basic HTML for email sending.
+ * Escapes HTML entities and converts newlines to <br> tags.
+ *
+ * @param text - Plain text email body
+ * @returns HTML string
  */
-const PUBSUB_BATCH_INTERVAL = 5; // Publish event every N emails
+function plainTextToHtml(text: string): string {
+  if (!text) return '';
+
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const htmlBody = escaped.replace(/\n/g, '<br>');
+
+  return `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">${htmlBody}</div>`;
+}
+
+/**
+ * Replaces template variables in email subject/body with actual contact data.
+ *
+ * Supported variables:
+ * - {FirstName} → contact's first name
+ * - {FullName} or {Name} → contact's full name
+ * - {Email} → contact's email address
+ *
+ * @param text - The template text containing variables
+ * @param firstName - Contact's first name
+ * @param fullName - Contact's full name
+ * @param email - Contact's email address
+ * @returns Text with variables replaced
+ */
+function replaceVariables(
+  text: string,
+  firstName: string,
+  fullName: string,
+  email: string
+): string {
+  if (!text) return text;
+
+  return text
+    .replace(/\{FirstName\}/gi, firstName)
+    .replace(/\{FullName\}/gi, fullName)
+    .replace(/\{Name\}/gi, fullName)
+    .replace(/\{Email\}/gi, email);
+}
 
 // ============================================================
 // MAIN PROCESSING FUNCTION
@@ -144,17 +171,10 @@ const PUBSUB_BATCH_INTERVAL = 5; // Publish event every N emails
 
 /**
  * Processes a campaign send job.
- *
- * This is the main entry point called by the BullMQ worker.
- * It orchestrates the entire email sending flow for a campaign.
+ * Orchestrates the entire email sending flow.
  *
  * @param job - BullMQ job containing campaignId and userId
- * @returns Summary of processed emails (success/failure counts)
- *
- * @example
- * // Called by BullMQ Worker
- * const result = await processCampaign(job);
- * // Returns: { totalProcessed: 100, successCount: 97, failureCount: 3, ... }
+ * @returns Summary of processed emails
  */
 export async function processCampaign(
   job: Job<SendCampaignJobData, SendCampaignJobResult>
@@ -166,13 +186,13 @@ export async function processCampaign(
   const startTime = Date.now();
   const { campaignId, userId } = job.data;
 
-  // Create a consistent log prefix for all messages from this job
+  // Consistent log prefix
   const logPrefix = `[Job:${job.id}][Campaign:${campaignId.substring(0, 8)}]`;
 
   console.log(
     `\n${'='.repeat(60)}\n` +
-      `${logPrefix} 🚀 Starting campaign processing\n` +
-      `${'='.repeat(60)}`
+    `${logPrefix} 🚀 Starting campaign processing\n` +
+    `${'='.repeat(60)}`
   );
   console.log(`${logPrefix} User: ${userId}`);
   console.log(`${logPrefix} Job ID: ${job.id}`);
@@ -188,9 +208,7 @@ export async function processCampaign(
     // ─────────────────────────────────────────────────────────
     // STEP 2: FETCH PENDING EMAILS
     // ─────────────────────────────────────────────────────────
-    // Only fetch emails that haven't been sent yet.
-    // This makes the job idempotent - safe to retry without duplicates.
-
+    // Fetch only 'pending' emails for idempotency.
     console.log(`${logPrefix} Fetching pending emails from database...`);
     console.log(`${logPrefix} Query: campaign_id=${campaignId}, status=pending`);
 
@@ -256,20 +274,16 @@ export async function processCampaign(
     // ─────────────────────────────────────────────────────────
     // STEP 4: PROCESS EACH EMAIL
     // ─────────────────────────────────────────────────────────
-    // We process emails sequentially to:
-    // 1. Respect Gmail rate limits (~5 emails/second)
-    // 2. Update progress after each email
-    // 3. Handle errors individually without affecting other emails
-
+    // Process sequentially to respect rate limits and handle errors.
     console.log(`${logPrefix} Starting email send loop...`);
 
     for (let emailIndex = 0; emailIndex < totalEmails; emailIndex++) {
-      const email = pendingEmails[emailIndex] as PendingEmail;
+      const email = pendingEmails[emailIndex] as unknown as PendingEmail;
       const emailLogPrefix = `${logPrefix}[${emailIndex + 1}/${totalEmails}]`;
 
       console.log(
         `${emailLogPrefix} Processing: ${email.contacts.email} ` +
-          `(ID: ${email.id.substring(0, 8)})`
+        `(ID: ${email.id.substring(0, 8)})`
       );
 
       try {
@@ -281,18 +295,30 @@ export async function processCampaign(
         console.log(`${emailLogPrefix} Email details: to=${email.contacts.email}, subject="${email.email_subject.substring(0, 50)}..."`);
         console.log(`${emailLogPrefix} Email body length: ${email.email_body.length} characters`);
 
+        // Replace placeholders with actual contact data
+        const contactFirstName = email.contacts.name?.split(' ')[0] || '';
+        const contactFullName = email.contacts.name || '';
+        const personalizedSubject = replaceVariables(email.email_subject, contactFirstName, contactFullName, email.contacts.email);
+        const personalizedBody = replaceVariables(email.email_body, contactFirstName, contactFullName, email.contacts.email);
+
+        // Convert plain text body to HTML for email sending
+        const htmlBody = plainTextToHtml(personalizedBody);
+
+        // Append tracking pixel for open tracking
+        const htmlWithTracking = appendTrackingPixel(htmlBody, email.id);
+
         const emailSendStartTime = Date.now();
         const sendResult = await sendEmail({
           to: email.contacts.email,
           toName: email.contacts.name || undefined,
-          subject: email.email_subject,
-          body: email.email_body,
+          subject: personalizedSubject,
+          body: htmlWithTracking,
           userId,
         });
 
         const emailSendDuration = Date.now() - emailSendStartTime;
         console.log(`${emailLogPrefix} Email send API call completed in ${emailSendDuration}ms`);
-        console.log(`${emailLogPrefix} Send result: success=${sendResult.success}, messageId=${sendResult.messageId}, errorCode=${sendResult.errorCode}`);
+        console.log(`${emailLogPrefix} Send result: success=${sendResult.success}`);
 
         if (sendResult.success) {
           // ───────────────────────────────────────────────────
@@ -301,26 +327,46 @@ export async function processCampaign(
 
           console.log(
             `${emailLogPrefix} ✅ Sent to ${email.contacts.email} ` +
-              `(Message ID: ${sendResult.messageId})`
+            `(Message ID: ${sendResult.messageId}, Thread ID: ${sendResult.threadId})`
           );
 
-          // Update database: mark as sent
+          // Update campaign_contacts: mark as sent with Gmail metadata
           await updateEmailStatus(
             email.id,
             'sent',
             sendResult.messageId,
+            sendResult.threadId,
             null,
             emailLogPrefix
+          );
+
+          // Insert into campaign_emails table with plain text body (not HTML)
+          await insertCampaignEmail({
+            campaignId: email.campaign_id,
+            contactId: email.contact_id,
+            emailSubject: personalizedSubject,
+            emailBody: personalizedBody,
+            gmailMessageId: sendResult.messageId,
+            gmailThreadId: sendResult.threadId,
+            logPrefix: emailLogPrefix,
+          });
+
+          // Create activity record for this sent email
+          await createActivity(
+            userId,
+            email.campaign_id,
+            'email_sent',
+            'Email sent',
+            `Email sent to ${email.contacts.email}: "${personalizedSubject}"`,
+            emailLogPrefix,
+            email.contact_id
           );
 
           // Increment success counter
           sentCount++;
 
-          // NOTE: Activity creation removed to reduce database load
-          // Activities are now only created for campaign completion and failures
-
-          // Publish success event to Redis Pub/Sub (batched to reduce Redis commands)
-          // Only publish every PUBSUB_BATCH_INTERVAL emails or on the last email
+          // Publish success event (batched)
+          // Only publish every PUBSUB_BATCH_INTERVAL emails or on last email
           if ((emailIndex + 1) % PUBSUB_BATCH_INTERVAL === 0 || emailIndex === totalEmails - 1) {
             await publishEmailSentEvent({
               userId,
@@ -341,7 +387,7 @@ export async function processCampaign(
 
           console.error(
             `${emailLogPrefix} ❌ Failed to send to ${email.contacts.email}: ` +
-              `${sendResult.errorCode} - ${sendResult.errorMessage}`
+            `${sendResult.errorCode} - ${sendResult.errorMessage}`
           );
           console.error(`${emailLogPrefix} Error details:`, {
             errorCode: sendResult.errorCode,
@@ -357,15 +403,13 @@ export async function processCampaign(
             email.id,
             'failed',
             null,
+            null,
             sendResult.errorMessage,
             emailLogPrefix
           );
 
           // Increment failure counter
           failedCount++;
-
-          // NOTE: Individual failure activities removed to reduce database load
-          // Failures are tracked in campaign_contacts table and summarized at completion
 
           // Publish failure event to Redis Pub/Sub (always publish failures for visibility)
           await publishEmailFailedEvent({
@@ -378,9 +422,8 @@ export async function processCampaign(
             timestamp: new Date().toISOString(),
           });
 
-          // IMPORTANT: We continue to the next email instead of failing
-          // the entire job. This ensures one bad email doesn't stop
-          // the whole campaign.
+          // Continue to next email on failure.
+          // Single email failure should not fail the job.
         }
       } catch (unexpectedError) {
         // ─────────────────────────────────────────────────────
@@ -396,7 +439,7 @@ export async function processCampaign(
 
         console.error(
           `${emailLogPrefix} ⚠️ Unexpected error sending to ` +
-            `${email.contacts.email}:`,
+          `${email.contacts.email}:`,
           {
             error: unexpectedError,
             stack: unexpectedError instanceof Error ? unexpectedError.stack : undefined,
@@ -413,6 +456,7 @@ export async function processCampaign(
           email.id,
           'failed',
           null,
+          null,
           `Unexpected error: ${errorMessage}`,
           emailLogPrefix
         );
@@ -425,13 +469,7 @@ export async function processCampaign(
       // ─────────────────────────────────────────────────────────
       // STEP 4e: UPDATE JOB PROGRESS (BATCHED)
       // ─────────────────────────────────────────────────────────
-      // BullMQ tracks job progress, which can be retrieved via the
-      // queue API for showing in dashboards.
-      //
-      // OPTIMIZATION: Only update progress every PROGRESS_UPDATE_INTERVAL
-      // emails to reduce Redis commands. For 500 emails, this reduces
-      // from 500 to ~50 Redis HSET commands.
-
+      // Update progress every PROGRESS_UPDATE_INTERVAL emails to reduce Redis ops.
       processedCount++;
       const progressPercentage = Math.round((processedCount / totalEmails) * 100);
 
@@ -454,11 +492,8 @@ export async function processCampaign(
       // ─────────────────────────────────────────────────────────
       // STEP 4f: RATE LIMITING DELAY
       // ─────────────────────────────────────────────────────────
-      // Gmail allows ~5 emails/second. Adding a 200ms delay between
-      // emails keeps us safely under this limit.
-      //
-      // Don't delay after the last email (unnecessary wait).
-
+      // 200ms delay between emails (~5 emails/sec limit).
+      // Skip delay after last email.
       if (emailIndex < totalEmails - 1) {
         console.log(`${emailLogPrefix} ⏱️ Applying rate limiting delay (200ms) before next email`);
         const delayStartTime = Date.now();
@@ -477,23 +512,24 @@ export async function processCampaign(
 
     console.log(
       `\n${logPrefix} 🎉 Campaign processing complete!\n` +
-        `${'─'.repeat(40)}\n` +
-        `   Total Processed: ${processedCount}\n` +
-        `   Successful: ${sentCount} ✅\n` +
-        `   Failed: ${failedCount} ❌\n` +
-        `   Duration: ${durationSeconds} seconds\n` +
-        `${'─'.repeat(40)}`
+      `${'─'.repeat(40)}\n` +
+      `   Total Processed: ${processedCount}\n` +
+      `   Successful: ${sentCount} ✅\n` +
+      `   Failed: ${failedCount} ❌\n` +
+      `   Duration: ${durationSeconds} seconds\n` +
+      `${'─'.repeat(40)}`
     );
 
-    // Update campaign status to 'sent'
-    const finalStatus = failedCount === totalEmails ? 'failed' : 'sent';
-    await updateCampaignStatus(campaignId, finalStatus, logPrefix);
+    // Update campaign status — 'sent' is the only valid completion status
+    // (the DB check constraint only allows: draft, composing, ready, sending, sent)
+    await updateCampaignStatus(campaignId, 'sent', logPrefix);
 
     // Create campaign completion activity
+    // (the DB check constraint only allows: email_sent, response_received, interview_scheduled, followup_scheduled, application_created, offer_received)
     await createActivity(
       userId,
       campaignId,
-      'campaign_complete',
+      'email_sent',
       'Campaign sending completed',
       `Sent ${sentCount} of ${totalEmails} emails (${failedCount} failed) in ${durationSeconds}s`,
       logPrefix
@@ -559,7 +595,7 @@ export async function processCampaign(
  * Updates the status of a campaign.
  *
  * @param campaignId - UUID of the campaign
- * @param status - New status ('draft' | 'sending' | 'sent' | 'failed')
+ * @param status - New status ('draft' | 'composing' | 'ready' | 'sending' | 'sent')
  * @param logPrefix - Log prefix for consistent logging
  */
 async function updateCampaignStatus(
@@ -606,11 +642,12 @@ async function updateCampaignStatus(
 }
 
 /**
- * Updates the status of an individual email.
+ * Updates the status of an individual email in campaign_contacts.
  *
  * @param emailId - UUID of the campaign_contact record
  * @param status - New status ('sent' | 'failed')
  * @param gmailMessageId - Gmail message ID (if sent successfully)
+ * @param gmailThreadId - Gmail thread ID (if sent successfully)
  * @param errorMessage - Error message (if failed)
  * @param logPrefix - Log prefix for consistent logging
  */
@@ -618,6 +655,7 @@ async function updateEmailStatus(
   emailId: string,
   status: 'sent' | 'failed',
   gmailMessageId: string | null,
+  gmailThreadId: string | null,
   errorMessage: string | null,
   logPrefix: string
 ): Promise<void> {
@@ -625,11 +663,11 @@ async function updateEmailStatus(
     status,
     sent_at: status === 'sent' ? new Date().toISOString() : null,
     error_message: errorMessage,
-    // Store Gmail message ID for tracking (if you have this column)
-    // gmail_message_id: gmailMessageId,
+    gmail_message_id: gmailMessageId,
+    gmail_thread_id: gmailThreadId,
   };
 
-  console.log(`${logPrefix} Updating email status: emailId=${emailId}, status=${status}, gmailMessageId=${gmailMessageId}`);
+  console.log(`${logPrefix} Updating campaign_contacts: emailId=${emailId}, status=${status}, gmailMessageId=${gmailMessageId}, gmailThreadId=${gmailThreadId}`);
   if (errorMessage) {
     console.log(`${logPrefix} Error message: ${errorMessage}`);
   }
@@ -641,11 +679,11 @@ async function updateEmailStatus(
     .eq('id', emailId);
 
   const updateDuration = Date.now() - updateStartTime;
-  console.log(`${logPrefix} Email status update completed in ${updateDuration}ms`);
+  console.log(`${logPrefix} campaign_contacts update completed in ${updateDuration}ms`);
 
   if (error) {
     console.error(
-      `${logPrefix} ⚠️ Failed to update email status for ${emailId}:`,
+      `${logPrefix} ⚠️ Failed to update campaign_contacts for ${emailId}:`,
       {
         error: error,
         code: error.code,
@@ -654,13 +692,71 @@ async function updateEmailStatus(
         emailId,
         status,
         gmailMessageId,
+        gmailThreadId,
         errorMessage,
         updateTime: updateDuration
       }
     );
     // Don't throw - status update failure shouldn't stop processing
   } else {
-    console.log(`${logPrefix} ✅ Email status updated successfully`);
+    console.log(`${logPrefix} ✅ campaign_contacts updated successfully`);
+  }
+}
+
+/**
+ * Inserts a record into the campaign_emails table after a successful send.
+ *
+ * This stores the full email metadata including Gmail response data
+ * (message ID, thread ID) for tracking, analytics, and thread management.
+ */
+async function insertCampaignEmail(params: {
+  campaignId: string;
+  contactId: string;
+  emailSubject: string;
+  emailBody: string;
+  gmailMessageId: string;
+  gmailThreadId: string;
+  logPrefix: string;
+}): Promise<void> {
+  const { campaignId, contactId, emailSubject, emailBody, gmailMessageId, gmailThreadId, logPrefix } = params;
+
+  console.log(`${logPrefix} Inserting into campaign_emails: gmailMessageId=${gmailMessageId}, gmailThreadId=${gmailThreadId}`);
+
+  const insertStartTime = Date.now();
+  const { error } = await supabase
+    .from('campaign_emails')
+    .insert({
+      campaign_id: campaignId,
+      contact_id: contactId,
+      email_subject: emailSubject,
+      email_body: emailBody,
+      status: 'sent',
+      sent_at: new Date().toISOString(),
+      gmail_message_id: gmailMessageId,
+      gmail_thread_id: gmailThreadId,
+    });
+
+  const insertDuration = Date.now() - insertStartTime;
+  console.log(`${logPrefix} campaign_emails insert completed in ${insertDuration}ms`);
+
+  if (error) {
+    console.error(
+      `${logPrefix} ⚠️ Failed to insert into campaign_emails:`,
+      {
+        error: error,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        campaignId,
+        contactId,
+        gmailMessageId,
+        gmailThreadId,
+        insertTime: insertDuration
+      }
+    );
+    // Don't throw - DB insert failure shouldn't stop the campaign
+  } else {
+    console.log(`${logPrefix} ✅ campaign_emails record created successfully`);
   }
 }
 
@@ -682,14 +778,15 @@ async function updateEmailStatus(
 async function createActivity(
   userId: string,
   campaignId: string,
-  type: 'email_sent' | 'email_failed' | 'campaign_complete',
+  type: 'email_sent' | 'response_received' | 'interview_scheduled' | 'followup_scheduled' | 'application_created' | 'offer_received',
   title: string,
   description: string,
-  logPrefix: string
+  logPrefix: string,
+  contactId?: string
 ): Promise<void> {
   console.log(`${logPrefix} Creating activity: type=${type}, title="${title}"`);
 
-  const activityData = {
+  const activityData: Record<string, unknown> = {
     user_id: userId,
     campaign_id: campaignId,
     type,
@@ -697,6 +794,10 @@ async function createActivity(
     description,
     created_at: new Date().toISOString(),
   };
+
+  if (contactId) {
+    activityData.contact_id = contactId;
+  }
 
   const insertStartTime = Date.now();
   const { error } = await supabase.from('activities').insert(activityData);
@@ -919,7 +1020,7 @@ export async function processCampaignInBatches(
     }
 
     // Process this batch
-    for (const email of batch as PendingEmail[]) {
+    for (const email of batch as unknown as PendingEmail[]) {
       const emailLogPrefix = `${logPrefix}[${processedCount + 1}/${totalEmails}]`;
 
       console.log(`${emailLogPrefix} Processing email from batch: ${email.contacts.email}`);
@@ -929,21 +1030,56 @@ export async function processCampaignInBatches(
         console.log(`${emailLogPrefix} Email details: to=${email.contacts.email}, subject="${email.email_subject.substring(0, 50)}..."`);
         console.log(`${emailLogPrefix} Email body length: ${email.email_body.length} characters`);
 
+        // Replace placeholders with actual contact data
+        const contactFirstName = email.contacts.name?.split(' ')[0] || '';
+        const contactFullName = email.contacts.name || '';
+        const personalizedSubject = replaceVariables(email.email_subject, contactFirstName, contactFullName, email.contacts.email);
+        const personalizedBody = replaceVariables(email.email_body, contactFirstName, contactFullName, email.contacts.email);
+
+        // Convert plain text body to HTML for email sending
+        const htmlBody = plainTextToHtml(personalizedBody);
+
+        // Append tracking pixel for open tracking
+        const htmlWithTracking = appendTrackingPixel(htmlBody, email.id);
+
         const emailSendStartTime = Date.now();
         const sendResult = await sendEmail({
           to: email.contacts.email,
           toName: email.contacts.name || undefined,
-          subject: email.email_subject,
-          body: email.email_body,
+          subject: personalizedSubject,
+          body: htmlWithTracking,
           userId,
         });
 
         const emailSendDuration = Date.now() - emailSendStartTime;
         console.log(`${emailLogPrefix} Email send API call completed in ${emailSendDuration}ms`);
-        console.log(`${emailLogPrefix} Send result: success=${sendResult.success}, messageId=${sendResult.messageId}, errorCode=${sendResult.errorCode}`);
+        console.log(`${emailLogPrefix} Send result: success=${sendResult.success}`);
 
         if (sendResult.success) {
-          await updateEmailStatus(email.id, 'sent', sendResult.messageId, null, emailLogPrefix);
+          await updateEmailStatus(email.id, 'sent', sendResult.messageId, sendResult.threadId, null, emailLogPrefix);
+
+          // Insert into campaign_emails table with plain text body (not HTML)
+          await insertCampaignEmail({
+            campaignId: email.campaign_id,
+            contactId: email.contact_id,
+            emailSubject: personalizedSubject,
+            emailBody: personalizedBody,
+            gmailMessageId: sendResult.messageId,
+            gmailThreadId: sendResult.threadId,
+            logPrefix: emailLogPrefix,
+          });
+
+          // Create activity record for this sent email
+          await createActivity(
+            userId,
+            email.campaign_id,
+            'email_sent',
+            'Email sent',
+            `Email sent to ${email.contacts.email}: "${personalizedSubject}"`,
+            emailLogPrefix,
+            email.contact_id
+          );
+
           sentCount++;
 
           // Batch Pub/Sub events to reduce Redis commands
@@ -970,7 +1106,7 @@ export async function processCampaignInBatches(
             campaignId: email.campaign_id,
             userId
           });
-          await updateEmailStatus(email.id, 'failed', null, sendResult.errorMessage, emailLogPrefix);
+          await updateEmailStatus(email.id, 'failed', null, null, sendResult.errorMessage, emailLogPrefix);
           failedCount++;
         }
       } catch (error) {
@@ -984,7 +1120,7 @@ export async function processCampaignInBatches(
           userId,
           errorType: error instanceof Error ? error.constructor.name : typeof error
         });
-        await updateEmailStatus(email.id, 'failed', null, errorMsg, emailLogPrefix);
+        await updateEmailStatus(email.id, 'failed', null, null, errorMsg, emailLogPrefix);
         failedCount++;
       }
 
@@ -1039,7 +1175,7 @@ export async function processCampaignInBatches(
 
   console.log(
     `${logPrefix} Batch processing complete: ` +
-      `${sentCount} sent, ${failedCount} failed in ${Math.round(durationMs / 1000)}s`
+    `${sentCount} sent, ${failedCount} failed in ${Math.round(durationMs / 1000)}s`
   );
 
   return {

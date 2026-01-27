@@ -131,7 +131,7 @@ export function useGooglePicker({
         };
 
         // Trigger OAuth flow (popup)
-        // prompt: '' ensures we don't force consent every time if already granted
+        // prompt: '' avoids forcing consent if already granted
         tokenClient.requestAccessToken({ prompt: '' });
 
     }, [isLoaded, tokenClient, developerKey, viewId, onSelect, onCancel]);

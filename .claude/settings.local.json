@@ -12,7 +12,9 @@
       "Bash(timeout 30 npm run dev)",
       "Bash(npm run worker:*)",
       "Bash(tasklist:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(ls:*)",
+      "Bash(test:*)"
     ]
   }
 }

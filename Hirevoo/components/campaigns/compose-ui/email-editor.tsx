@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useEditor, EditorContent } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import Placeholder from "@tiptap/extension-placeholder"
@@ -88,7 +88,7 @@ export function EmailEditor({
         extensions: [
             StarterKit,
             Placeholder.configure({
-                placeholder: "Hi {FirstName}, I hope this email finds you well...",
+                placeholder: "Start writing your email here...",
                 emptyEditorClass: "is-editor-empty before:content-[attr(data-placeholder)] before:text-gray-400 before:float-left before:pointer-events-none",
             }),
             Link.configure({
@@ -102,32 +102,21 @@ export function EmailEditor({
             },
         },
         onUpdate: ({ editor }) => {
-            // We use HTML for the email body
-            setEmailBody(editor.getHTML())
+            // Store plain text in the database, not HTML
+            setEmailBody(editor.getText())
         },
     })
 
-    // Sync content when emailBody changes externally (e.g. template selection)
-    // We need to be careful not to create infinite loops, but since editor.getHTML() matches emailBody, it should be stable.
-    // However, purely relying on onUpdate is safer, but if `emailBody` prop changes (e.g. loaded template), we need to set it.
-    if (editor && emailBody !== editor.getHTML()) {
-        // Only update if content is significantly different to avoid cursor jumps
-        // For simplicity in this structure, we'll force update if distinct.
-        // In a real app, might want a more robust comparison or use a useEffect with a ref to track origin of change.
-        // For now, we will use a useEffect to sync downwards.
-    }
-
-    // Better way:
-    // React.useEffect(() => {
-    //    if (editor && emailBody !== editor.getHTML()) {
-    //        editor.commands.setContent(emailBody)
-    //    }
-    // }, [emailBody, editor])
-    // But inside the component body we can't use hooks conditionally.
-    // Let's add the Effect below.
+    // Sync editor content when emailBody changes externally (contact switch, template selection)
+    useEffect(() => {
+        if (editor && emailBody !== editor.getText()) {
+            editor.commands.setContent(emailBody)
+        }
+    }, [emailBody, editor])
 
     const handleInsertVariable = () => {
-        editor?.chain().focus().insertContent("{FirstName}").run()
+        const firstName = selectedContact?.name?.split(' ')[0] || '{FirstName}'
+        editor?.chain().focus().insertContent(firstName).run()
     }
 
     const toggleBold = () => editor?.chain().focus().toggleBold().run()

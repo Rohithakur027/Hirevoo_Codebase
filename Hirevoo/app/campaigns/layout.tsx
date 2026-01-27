@@ -7,7 +7,9 @@ export default function CampaignsLayout({ children }: { children: React.ReactNod
     return (
         <SidebarProvider>
             <div className="flex h-screen bg-gray-50 overflow-hidden">
-                <SideBar />
+                <div className="hidden md:block">
+                    <SideBar />
+                </div>
                 <div className="flex-1 flex flex-col overflow-hidden">
                     {children}
                 </div>

@@ -1,137 +1,166 @@
 import { NextResponse } from 'next/server';
-import { google } from 'googleapis';
+import { getServerSession } from 'next-auth';
 import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+import { authOptions } from '@/lib/auth';
+import { gmailClient } from '@/lib/gmail/client';
+import { getUTCTimeISO } from '@/lib/date-helpers';
+import { appendTrackingPixel } from '@/lib/tracking';
 
-// --- Helper Functions ---
+const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-// Placeholder decryption function - REPLACE with your actual decryption logic
-// Ensure this matches how you encrypt tokens in your application
-function decrypt(text: string): string {
-    // In a real app, use crypto to decrypt using your ENCRYPTION_KEY
-    // const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(process.env.ENCRYPTION_KEY!), iv);
-    // ...
-    // For now, returning as is or add simple logic if needed. 
-    // Assuming the DB stores it essentially ready to use or reversed for demo.
-    return text;
+/**
+ * Converts plain text to basic HTML for email sending.
+ */
+function plainTextToHtml(text: string): string {
+    if (!text) return '';
+
+    const escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const htmlBody = escaped.replace(/\n/g, '<br>');
+
+    return `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">${htmlBody}</div>`;
 }
 
 /**
- * Creates a MIME message properly encoded for Gmail API (Base64URL).
- * Implements multipart/alternative to support both HTML and Plain Text.
+ * POST /api/campaign/send
+ *
+ * Sends a single email using the authenticated user's Gmail account.
+ * Uses stateless token architecture: decrypt refresh token → get ephemeral access token → send.
+ *
+ * Request body:
+ * - to: string (recipient email)
+ * - subject: string
+ * - htmlContent: string (HTML body)
+ * - campaignId?: string (optional, for logging to campaign_emails)
+ * - contactId?: string (optional, for activity logging)
  */
-function createMimeMessage(to: string, subject: string, htmlContent: string): string {
-    const boundary = `boundary_${Date.now().toString(16)}`;
-
-    // Create plain text fallback (simple strip tags for robustness)
-    const plainText = htmlContent.replace(/<[^>]+>/g, '');
-
-    const messageParts = [
-        `To: ${to}`,
-        `Subject: ${subject}`,
-        'MIME-Version: 1.0',
-        `Content-Type: multipart/alternative; boundary="${boundary}"`,
-        '',
-        `--${boundary}`,
-        'Content-Type: text/plain; charset="UTF-8"',
-        'Content-Transfer-Encoding: quoted-printable',
-        '',
-        plainText, // In a real scenario, ensure quoted-printable encoding for body too if complex chars
-        '',
-        `--${boundary}`,
-        'Content-Type: text/html; charset="UTF-8"',
-        'Content-Transfer-Encoding: quoted-printable',
-        '',
-        htmlContent,
-        '',
-        `--${boundary}--`
-    ];
-
-    const emailRaw = messageParts.join('\r\n');
-
-    // encode Base64URL (RFC 4648)
-    const encodedEmail = Buffer.from(emailRaw)
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-
-    return encodedEmail;
-}
-
-// --- API Route ---
-
 export async function POST(req: Request) {
     try {
-        const { to, subject, htmlContent } = await req.json();
+        // 1. Authenticate the user
+        const session = await getServerSession(authOptions);
+
+        if (!session?.user?.email || !(session.user as any).id) {
+            return NextResponse.json(
+                { success: false, error: 'Not authenticated' },
+                { status: 401 }
+            );
+        }
+
+        const userId = (session.user as any).id;
+
+        // 2. Parse and validate request body
+        const { to, subject, htmlContent, campaignId, contactId } = await req.json();
 
         if (!to || !subject || !htmlContent) {
-            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+            return NextResponse.json(
+                { success: false, error: 'Missing required fields: to, subject, htmlContent' },
+                { status: 400 }
+            );
         }
 
-        // 1. Initialize Supabase Admin Client to fetch secrets
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!
-        );
-
-        // 2. Retrieve the User's Encrypted Refresh Token
-        // Ideally, get the userId from the session. 
-        // For this implementation, we assume the user is authenticated 
-        // and we lookup their token. 
-        // DEMO: Querying the first available token or specific testing logic
-        // In production: const { data: { user } } = await supabase.auth.getUser();
-
-        // We'll fallback to a known test user ID or just pick one for the "Backend-Delegate" demo
-        const { data: tokenData, error: dbError } = await supabase
-            .from('google_auth_tokens')
-            .select('refresh_token')
-            .limit(1)
+        // 3. Verify Gmail is connected
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('gmail_connected')
+            .eq('id', userId)
             .single();
 
-        if (dbError || !tokenData) {
-            console.error("Database Error:", dbError);
-            return NextResponse.json({ error: 'Failed to retrieve auth token' }, { status: 401 });
+        if (userError || !user?.gmail_connected) {
+            return NextResponse.json(
+                { success: false, error: 'Gmail not connected. Please connect your Gmail account in Settings.' },
+                { status: 400 }
+            );
         }
 
-        const refreshToken = decrypt(tokenData.refresh_token);
+        // 4. Convert plain text to HTML for email sending
+        let emailHtml = plainTextToHtml(htmlContent);
 
-        // 3. Initialize Google OAuth2 Client
-        const oauth2Client = new google.auth.OAuth2(
-            process.env.GOOGLE_CLIENT_ID,
-            process.env.GOOGLE_CLIENT_SECRET,
-            process.env.GOOGLE_REDIRECT_URI
-        );
+        // 4b. Append tracking pixel if this is a campaign email
+        // Require campaign_contacts.id for the pixel URL
+        if (campaignId && contactId) {
+            const { data: cc } = await supabase
+                .from('campaign_contacts')
+                .select('id')
+                .eq('campaign_id', campaignId)
+                .eq('contact_id', contactId)
+                .maybeSingle();
 
-        // 4. Set Credentials (Refresh Token) 
-        // The library automatically handles access token refresh using this.
-        oauth2Client.setCredentials({
-            refresh_token: refreshToken
+            if (cc) {
+                emailHtml = appendTrackingPixel(emailHtml, cc.id);
+            }
+        }
+
+        // 5. Send email via GmailClient (handles decrypt → refresh → send)
+        const result = await gmailClient.sendEmail(userId, {
+            to,
+            subject,
+            body: emailHtml,
         });
 
-        // 5. Initialize Gmail API
-        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+        if (!result.success) {
+            console.error('[Campaign Send] Email send failed:', result.errorMessage);
+            return NextResponse.json(
+                { success: false, error: result.errorMessage, code: result.errorCode },
+                { status: result.errorCode === 'INVALID_RECIPIENT' ? 400 : 500 }
+            );
+        }
 
-        // 6. Construct and Send Email
-        const rawMessage = createMimeMessage(to, subject, htmlContent);
+        // 5. Post-send logging
+        // Log to campaign_emails if campaignId is provided
+        if (campaignId) {
+            const { error: emailLogError } = await supabase
+                .from('campaign_emails')
+                .insert({
+                    campaign_id: campaignId,
+                    contact_id: contactId || null,
+                    user_id: userId,
+                    gmail_message_id: result.messageId,
+                    gmail_thread_id: result.threadId,
+                    status: 'sent',
+                    sent_at: getUTCTimeISO(),
+                });
 
-        const res = await gmail.users.messages.send({
-            userId: 'me',
-            requestBody: {
-                raw: rawMessage,
-            },
+            if (emailLogError) {
+                console.error('[Campaign Send] Failed to log to campaign_emails:', emailLogError);
+                // Non-fatal: email was still sent successfully
+            }
+        }
+
+        // Log activity
+        const { error: activityError } = await supabase
+            .from('activities')
+            .insert({
+                user_id: userId,
+                campaign_id: campaignId || null,
+                contact_id: contactId || null,
+                type: 'sent',
+                title: 'Email sent',
+                description: `Email sent to ${to}: "${subject}"`,
+            });
+
+        if (activityError) {
+            console.error('[Campaign Send] Failed to log activity:', activityError);
+            // Non-fatal: email was still sent successfully
+        }
+
+        return NextResponse.json({
+            success: true,
+            messageId: result.messageId,
+            threadId: result.threadId,
         });
-
-        return NextResponse.json({ success: true, messageId: res.data.id });
 
     } catch (error: any) {
-        console.error('Gmail API Error:', error);
-
-        // Handle Token Errors (Revoked/Invalid)
-        if (error.response?.status === 400 && error.response?.data?.error === 'invalid_grant') {
-            return NextResponse.json({ error: 'Google Access Token Expired/Revoked' }, { status: 401 });
-        }
-
-        return NextResponse.json({ error: 'Internal Server Error', details: error.message }, { status: 500 });
+        console.error('[Campaign Send] Unexpected error:', error);
+        return NextResponse.json(
+            { success: false, error: 'Internal server error' },
+            { status: 500 }
+        );
     }
 }

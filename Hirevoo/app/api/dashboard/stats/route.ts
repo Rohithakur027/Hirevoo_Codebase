@@ -33,14 +33,7 @@ export async function GET(request: NextRequest) {
         }
 
         // 3. Get total outreach (sent emails)
-        // We count campaign_contacts where status is 'sent' for campaigns owned by the user
-        // Note: This assumes a join or robust RLS. simpler might be to get IDs first or use a view.
-        // Let's try a direct count query on campaign_contacts filtered by campaign's user_id.
-        // However, simplest efficient way with Supabase is usually to query directly if RLS allows, 
-        // or join. Since we might not have complex joins setup, let's look at `campaign_contacts`
-        // We need to ensure we only count for this user.
-        // Strategy: Get all campaign IDs for user, then count contacts in those campaigns with status 'sent'.
-
+        // Count campaign_contacts with 'sent' status for user's campaigns
         const { data: campaigns } = await supabase
             .from('campaigns')
             .select('id')
@@ -63,10 +56,7 @@ export async function GET(request: NextRequest) {
         }
 
         // 4. Get chart data (emails sent by day for last 7 days)
-        // Since we don't have an easy "group by" in basic Supabase client without stored procedures,
-        // we can fetch the `sent_at` timestamps for the last 7 days and aggregate in JS.
-        // This is acceptable for smaller datasets. For larger, a RPC or View is better.
-
+        // Fetch `updated_at` timestamps for last 7 days and aggregate in-memory
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
@@ -78,7 +68,7 @@ export async function GET(request: NextRequest) {
             // Actually, the prompt explicitly says "from campaign_contacts.sent_at".
             .in('campaign_id', campaignIds)
             .eq('status', 'sent')
-            .gte('updated_at', sevenDaysAgo.toISOString()); // Using updated_at for query efficiency as it's indexed usually
+            .gte('updated_at', sevenDaysAgo.toISOString());
 
         // Aggregate by day
         const chartDataMap = new Map<string, number>();
@@ -89,25 +79,14 @@ export async function GET(request: NextRequest) {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const dayName = days[d.getDay()];
-            chartDataMap.set(dayName, 0); // Note: this simple keying might overlap if same day name, but for 7 days it's fine (mostly).
-            // Actually, better to key by logic order, but UI expects [{day: 'Mon', value: 10}].
-            // Let's stick to the simple day name for now as per UI example.
+            chartDataMap.set(dayName, 0);
         }
 
-        // Fill with data
-        // Note: If real `sent_at` column exists, use it. If not, `updated_at`.
-        // I will use `updated_at` as it's more standard if `sent_at` isn't confirmed schema. 
-        // Wait, prompt said "campaign_contacts.sent_at". I'll try to select it, if it fails I might need to adjust.
-        // Safest is to use updated_at since status='sent' implies update time is send time.
-
+        // Fill with data using updated_at as proxy for sent_at
         recentSentContacts?.forEach(contact => {
             const date = new Date(contact.updated_at);
             const dayName = days[date.getDay()];
-            // We only want to increment the day relevant to the specific date instance in our 7 day window
-            // But the map keys are just "Mon", "Tue". If today is Mon, and 7 days ago was Mon, we might collide?
-            // 7 days ago (inclusive) is 8 items? 0 to 6 is 7 days.
-            // Today is Wed. 
-            // Wed, Tue, Mon, Sun, Sat, Fri, Thu. No collisions.
+            // Increment day count
 
             if (chartDataMap.has(dayName)) {
                 chartDataMap.set(dayName, (chartDataMap.get(dayName) || 0) + 1);

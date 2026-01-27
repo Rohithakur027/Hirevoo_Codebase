@@ -16,6 +16,7 @@ interface CreateCampaignResponse {
     contactCount: number;
     createdAt: string;
     updatedAt: string;
+    contactIdMap?: Record<string, string>; // email → database contact ID
   };
   error?: string;
   code?: string;
@@ -41,7 +42,7 @@ interface CampaignContextType {
   addContacts: (contacts: CampaignContact[]) => void;
   updateContactEmail: (contactId: string, subject: string, body: string) => void;
   markContactDone: (contactId: string) => void;
-  saveContactsToDatabase: () => Promise<boolean>;
+  saveContactsToDatabase: (pendingUpdate?: { contactId: string; subject: string; body: string }) => Promise<boolean>;
   currentContactId: string | null;
   setCurrentContactId: (id: string | null) => void;
   completedCount: number;
@@ -123,7 +124,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
       console.log('[CampaignContext] Campaign saved to database:', data.campaign.id);
 
-      // Update the campaign with the real database ID
+      // Update the campaign with the real database ID and remap contact IDs
+      const contactIdMap = data.campaign!.contactIdMap;
       setCampaign(prev => {
         if (!prev || prev.id !== localCampaign.id) return prev;
         return {
@@ -131,8 +133,22 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           id: data.campaign!.id,
           createdAt: data.campaign!.createdAt,
           updatedAt: data.campaign!.updatedAt,
+          contacts: contactIdMap
+            ? prev.contacts.map(c => ({
+                ...c,
+                id: contactIdMap[c.email] || c.id,
+              }))
+            : prev.contacts,
         };
       });
+
+      // Also remap currentContactId if it was set
+      if (contactIdMap && currentContactId) {
+        const contact = localCampaign.contacts.find(c => c.id === currentContactId);
+        if (contact && contactIdMap[contact.email]) {
+          setCurrentContactId(contactIdMap[contact.email]);
+        }
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save campaign';
       console.error('[CampaignContext] Save failed:', errorMessage);
@@ -179,11 +195,17 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         throw new Error(data.error || 'Failed to save campaign');
       }
 
+      const contactIdMap = data.campaign.contactIdMap;
       const savedCampaign: Campaign = {
         id: data.campaign.id,
         name: data.campaign.name,
         status: data.campaign.status as Campaign['status'],
-        contacts,
+        contacts: contactIdMap
+          ? contacts.map(c => ({
+              ...c,
+              id: contactIdMap[c.email] || c.id,
+            }))
+          : contacts,
         createdAt: data.campaign.createdAt,
         updatedAt: data.campaign.updatedAt,
       };
@@ -257,7 +279,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   /**
    * Save all contact email content to the database
    */
-  const saveContactsToDatabase = useCallback(async (): Promise<boolean> => {
+  const saveContactsToDatabase = useCallback(async (
+    pendingUpdate?: { contactId: string; subject: string; body: string }
+  ): Promise<boolean> => {
     if (!campaign || campaign.id.startsWith('temp-')) {
       console.warn('[CampaignContext] Cannot save contacts - campaign not yet persisted');
       return false;
@@ -267,7 +291,16 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
-      const contactsToUpdate = campaign.contacts.filter(c => c.emailSubject || c.emailBody);
+      // Apply any pending update that hasn't been flushed to state yet
+      const contactsWithPending = pendingUpdate
+        ? campaign.contacts.map(c =>
+            c.id === pendingUpdate.contactId
+              ? { ...c, emailSubject: pendingUpdate.subject, emailBody: pendingUpdate.body }
+              : c
+          )
+        : campaign.contacts;
+
+      const contactsToUpdate = contactsWithPending.filter(c => c.emailSubject || c.emailBody);
 
       if (contactsToUpdate.length === 0) {
         return true;

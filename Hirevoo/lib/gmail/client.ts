@@ -1,6 +1,7 @@
 import { google, gmail_v1 } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 import { decrypt } from "@/lib/encryption";
+import { getUTCTimeISO } from "@/lib/date-helpers";
 
 // Supabase client for token management
 const supabaseAdmin = createClient(
@@ -32,9 +33,7 @@ export interface SendEmailError {
 }
 
 export interface TokenInfo {
-    accessToken: string;
     refreshToken: string;
-    expiresAt: Date;
 }
 
 export class GmailClient {
@@ -113,44 +112,37 @@ export class GmailClient {
     async getUserTokens(userId: string): Promise<TokenInfo | null> {
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('gmail_access_token, gmail_refresh_token, gmail_refresh_token_salt, gmail_refresh_token_content, gmail_refresh_token_tag, gmail_token_expires_at')
+            .select('gmail_refresh_token_IV, gmail_refresh_token_content, gmail_refresh_token_tag')
             .eq('id', userId)
             .single();
 
-        if (error || !user?.gmail_access_token) {
+        if (error) {
             console.error('[GmailClient] Failed to fetch tokens:', error);
             return null;
         }
 
-        let refreshToken = user.gmail_refresh_token;
-
-        // Try decrypting if we have the new columns
-        if (user.gmail_refresh_token_content && user.gmail_refresh_token_salt && user.gmail_refresh_token_tag) {
-            try {
-                refreshToken = decrypt({
-                    salt: user.gmail_refresh_token_salt,
-                    content: user.gmail_refresh_token_content,
-                    tag: user.gmail_refresh_token_tag
-                });
-            } catch (e) {
-                console.error('[GmailClient] Failed to decrypt token:', e);
-                // Fallback to legacy plain text if decryption fails but old token exists
-                if (!refreshToken) return null;
-            }
-        } else if (!refreshToken) {
-            // No legacy token and no encrypted token
+        if (!user.gmail_refresh_token_content || !user.gmail_refresh_token_IV || !user.gmail_refresh_token_tag) {
             return null;
         }
 
-        return {
-            accessToken: user.gmail_access_token,
-            refreshToken: refreshToken,
-            expiresAt: new Date(user.gmail_token_expires_at),
-        };
+        try {
+            const refreshToken = decrypt({
+                salt: user.gmail_refresh_token_IV,
+                content: user.gmail_refresh_token_content,
+                tag: user.gmail_refresh_token_tag
+            });
+
+            return {
+                refreshToken,
+            };
+        } catch (e) {
+            console.error('[GmailClient] Failed to decrypt token:', e);
+            return null;
+        }
     }
 
     /**
-     * Check if token is expired (with 5-minute buffer)
+     * Check if token is expired (5-minute buffer)
      */
     isTokenExpired(expiresAt: Date): boolean {
         const bufferMs = 5 * 60 * 1000; // 5 minutes buffer
@@ -159,7 +151,8 @@ export class GmailClient {
     }
 
     /**
-     * Refresh access token using refresh token
+     * Refresh access token using refresh token.
+     * Sets gmail_connected = false on invalid_grant.
      */
     async refreshAccessToken(userId: string, refreshToken: string): Promise<string> {
         console.log(`[GmailClient] Refreshing token for user ${userId}`);
@@ -173,30 +166,30 @@ export class GmailClient {
                 throw new Error('No access token returned from refresh');
             }
 
-            // Calculate new expiration time
-            const expiresAt = credentials.expiry_date
-                ? new Date(credentials.expiry_date)
-                : new Date(Date.now() + 3600 * 1000);
+            // Do not store access token in database
+            // Return for immediate in-memory use
+            return credentials.access_token;
+        } catch (error: any) {
+            console.error('[GmailClient] Token refresh failed:', error);
 
-            // Update database with new token
-            const { error: updateError } = await supabaseAdmin
-                .from('users')
-                .update({
-                    gmail_access_token: credentials.access_token,
-                    gmail_token_expires_at: expiresAt.toISOString(),
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', userId);
+            // Handle invalid_grant (revoked or expired refresh token)
+            const isInvalidGrant =
+                error?.response?.data?.error === 'invalid_grant' ||
+                error?.message?.includes('invalid_grant');
 
-            if (updateError) {
-                console.error('[GmailClient] Failed to update tokens:', updateError);
-                throw new Error('Failed to update Gmail tokens in database');
+            if (isInvalidGrant) {
+                console.warn(`[GmailClient] invalid_grant for user ${userId} — marking gmail_connected = false`);
+                try {
+                    await supabaseAdmin
+                        .from('users')
+                        .update({ gmail_connected: false, updated_at: getUTCTimeISO() })
+                        .eq('id', userId);
+                } catch (dbError) {
+                    console.error('[GmailClient] Failed to mark gmail_connected = false:', dbError);
+                }
+                throw new Error('Gmail access has been revoked. Please reconnect your Gmail account in Settings.');
             }
 
-            console.log(`[GmailClient] Token refreshed successfully, expires at: ${expiresAt.toISOString()}`);
-            return credentials.access_token;
-        } catch (error) {
-            console.error('[GmailClient] Token refresh failed:', error);
             throw new Error('Failed to refresh Gmail token. User may need to reconnect.');
         }
     }
@@ -211,12 +204,9 @@ export class GmailClient {
             throw new Error('Gmail not connected. Please connect your Gmail account in Settings.');
         }
 
-        if (this.isTokenExpired(tokens.expiresAt)) {
-            console.log(`[GmailClient] Token expired for user ${userId}, refreshing...`);
-            return await this.refreshAccessToken(userId, tokens.refreshToken);
-        }
-
-        return tokens.accessToken;
+        // Always refresh/get new token since none are stored
+        console.log(`[GmailClient] Getting new access token for user ${userId}...`);
+        return await this.refreshAccessToken(userId, tokens.refreshToken);
     }
 
     /**
@@ -355,6 +345,16 @@ export class GmailClient {
         const errorReason = error.errors?.[0]?.reason;
 
         console.log(`${logPrefix} Gmail error - Code: ${statusCode}, Reason: ${errorReason}`);
+
+        // Revoked / invalid refresh token (propagated from refreshAccessToken)
+        if (error.message?.includes('revoked') || error.message?.includes('invalid_grant')) {
+            return {
+                success: false,
+                errorCode: 'TOKEN_REVOKED',
+                errorMessage: 'Gmail access has been revoked. Please reconnect your Gmail account in Settings.',
+                isRetryable: false,
+            };
+        }
 
         // Authentication expired
         if (statusCode === 401) {

@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { createClient } from '@supabase/supabase-js';
 import { authOptions } from '@/lib/auth';
+import { getUTCTimeISO } from '@/lib/date-helpers';
 
 // ============================================================
 // DATABASE CLIENT (Global Instance)
@@ -69,12 +70,12 @@ async function checkAndRecoverStuckCampaign(
   if (updatedAt) {
     const updatedAtTime = new Date(updatedAt).getTime();
     const timeSinceUpdate = Date.now() - updatedAtTime;
-    
+
     if (timeSinceUpdate > MAX_SENDING_DURATION_MS) {
       console.log(`[API:send] Campaign ${campaignId} stuck - exceeded max duration (${Math.round(timeSinceUpdate / 60000)} minutes)`);
-      return { 
-        isStuck: true, 
-        reason: `Campaign has been in 'sending' state for ${Math.round(timeSinceUpdate / 60000)} minutes without completing` 
+      return {
+        isStuck: true,
+        reason: `Campaign has been in 'sending' state for ${Math.round(timeSinceUpdate / 60000)} minutes without completing`
       };
     }
   }
@@ -91,22 +92,22 @@ async function checkAndRecoverStuckCampaign(
 
     if (jobStatusResponse.ok) {
       const jobStatus = await jobStatusResponse.json();
-      
+
       // If no active job exists, campaign is stuck
       if (!jobStatus.hasJob) {
         console.log(`[API:send] Campaign ${campaignId} stuck - no active job in queue`);
-        return { 
-          isStuck: true, 
-          reason: 'No active background job found for this campaign' 
+        return {
+          isStuck: true,
+          reason: 'No active background job found for this campaign'
         };
       }
 
       // If job exists but is completed/failed, campaign is stuck
       if (jobStatus.job && ['completed', 'failed'].includes(jobStatus.job.state)) {
         console.log(`[API:send] Campaign ${campaignId} stuck - job state is ${jobStatus.job.state}`);
-        return { 
-          isStuck: true, 
-          reason: `Background job already ${jobStatus.job.state}` 
+        return {
+          isStuck: true,
+          reason: `Background job already ${jobStatus.job.state}`
         };
       }
     }
@@ -116,9 +117,9 @@ async function checkAndRecoverStuckCampaign(
     if (updatedAt) {
       const timeSinceUpdate = Date.now() - new Date(updatedAt).getTime();
       if (timeSinceUpdate > STUCK_CAMPAIGN_TIMEOUT_MS) {
-        return { 
-          isStuck: true, 
-          reason: 'Cannot verify job status and campaign appears stuck' 
+        return {
+          isStuck: true,
+          reason: 'Cannot verify job status and campaign appears stuck'
         };
       }
     }
@@ -136,9 +137,9 @@ async function resetStuckCampaign(campaignId: string): Promise<void> {
   // Reset campaign status to 'ready'
   const { error: campaignError } = await supabase
     .from('campaigns')
-    .update({ 
+    .update({
       status: 'ready',
-      updated_at: new Date().toISOString()
+      updated_at: getUTCTimeISO()
     })
     .eq('id', campaignId);
 
@@ -150,7 +151,7 @@ async function resetStuckCampaign(campaignId: string): Promise<void> {
   // Reset any contacts that were not sent (keep 'sent' ones as-is)
   const { error: contactsError } = await supabase
     .from('campaign_contacts')
-    .update({ 
+    .update({
       status: 'pending',
       error_message: null
     })
@@ -202,7 +203,7 @@ export async function POST(
 
     const session = await getServerSession(authOptions);
     console.log(`[API:send] Session:`, session ? 'Found' : 'Not found');
-    
+
     // Type guard for session user
     if (!session?.user?.email) {
       return errorResponse(
@@ -271,15 +272,15 @@ export async function POST(
 
     if (campaign.status === 'sending') {
       console.log(`[API:send] Campaign is in 'sending' state, checking if stuck...`);
-      
+
       const { isStuck, reason } = await checkAndRecoverStuckCampaign(
-        campaignId, 
+        campaignId,
         campaign.updated_at
       );
 
       if (isStuck) {
         console.log(`[API:send] Campaign is stuck: ${reason}. Attempting recovery...`);
-        
+
         try {
           await resetStuckCampaign(campaignId);
           console.log(`[API:send] Successfully recovered stuck campaign. Proceeding with send...`);
@@ -299,7 +300,7 @@ export async function POST(
           'Campaign is currently being sent. Please wait for it to complete.',
           'CAMPAIGN_ALREADY_SENDING',
           409,
-          { 
+          {
             status: 'sending',
             suggestion: 'Check the campaign status or wait for completion'
           }
@@ -319,7 +320,7 @@ export async function POST(
         console.log(`[API:send] Campaign marked as 'sent' but has ${remainingPending} pending contacts. Resetting...`);
         await supabase
           .from('campaigns')
-          .update({ status: 'ready', updated_at: new Date().toISOString() })
+          .update({ status: 'ready', updated_at: getUTCTimeISO() })
           .eq('id', campaignId);
         // Continue with send
       } else {
@@ -327,7 +328,7 @@ export async function POST(
           'Campaign has already been sent. Create a new campaign to send again.',
           'CAMPAIGN_ALREADY_SENT',
           409,
-          { 
+          {
             status: 'sent',
             suggestion: 'Create a new campaign or duplicate this one to send again'
           }
@@ -435,7 +436,7 @@ export async function POST(
     if (remainingQuota <= 0) {
       return errorResponse(
         `Daily sending limit reached (${dailyLimit} emails). ` +
-          `Upgrade your plan for higher limits.`,
+        `Upgrade your plan for higher limits.`,
         'DAILY_LIMIT_EXCEEDED',
         429,
         {
@@ -449,13 +450,13 @@ export async function POST(
     if (pendingEmails > remainingQuota) {
       console.warn(
         `[API:send] Campaign has ${pendingEmails} emails but only ` +
-          `${remainingQuota} remaining in daily quota`
+        `${remainingQuota} remaining in daily quota`
       );
     }
 
     console.log(
       `[API:send] Daily limit: ${emailsSentToday}/${dailyLimit} ` +
-        `(${remainingQuota} remaining)`
+      `(${remainingQuota} remaining)`
     );
 
     // ─────────────────────────────────────────────────────────
@@ -466,7 +467,7 @@ export async function POST(
 
     // Queue job to bg-worker via internal API call
     const bgWorkerUrl = process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
-    
+
     // Note: Ensure your bg-worker endpoint allows POST requests and handles the body correctly
     const queueResponse = await fetch(`${bgWorkerUrl}/api/campaigns/${campaignId}/send`, {
       method: 'POST',

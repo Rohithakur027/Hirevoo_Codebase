@@ -1,31 +1,11 @@
 /**
- * app/api/campaigns/[id]/send/route.ts
- *
- * Purpose: API endpoint that validates a campaign and queues it for background sending
- *
- * This is the entry point for the "Send Campaign" button in the UI.
- * When called, it:
- * 1. Validates the user is authenticated
- * 2. Validates the campaign exists and belongs to the user
- * 3. Validates Gmail is connected
- * 4. Validates there are pending emails to send
- * 5. Queues the campaign job for background processing
- * 6. Returns immediately (< 300ms response time)
- *
- * The actual email sending happens in the background worker process.
- *
- * @example
- * // Client-side usage
- * const response = await fetch(`/api/campaigns/${campaignId}/send`, {
- *   method: 'POST',
- *   headers: { 'Content-Type': 'application/json' }
- * });
- *
- * const data = await response.json();
- * if (data.success) {
- *   console.log('Campaign queued:', data.jobId);
- *   // Connect to WebSocket for real-time updates
- * }
+ * API endpoint that validates a campaign and queues it for background sending.
+ * Entry point for "Send Campaign".
+ * 1. Authenticates user
+ * 2. Validates campaign/ownership
+ * 3. Validates Gmail connection
+ * 4. Validates pending emails
+ * 5. Queues campaign job
  *
  * @module app/api/campaigns/[id]/send/route
  */
@@ -120,12 +100,8 @@ function errorResponse(
 }
 
 /**
- * Estimates how long the campaign will take to send.
- *
- * Calculation based on:
- * - ~5 emails per second (Gmail limit)
- * - 200ms delay between emails (rate limiting)
- * - Small overhead for database operations
+ * Estimates sending duration.
+ * Based on ~5 emails/sec (Gmail limit) + 200ms rate limit + overhead.
  *
  * @param emailCount - Number of emails to send
  * @returns Estimated duration in seconds
@@ -163,7 +139,7 @@ export async function POST(
     // ─────────────────────────────────────────────────────────
     // STEP 1: AUTHENTICATE REQUEST
     // ─────────────────────────────────────────────────────────
-    // This endpoint now only accepts internal API calls with API key authentication
+    // Authenticate internal API calls
 
     const authHeader = request.headers.get('authorization');
     const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
@@ -213,7 +189,7 @@ export async function POST(
     if (campaign.user_id !== userId) {
       console.warn(
         `[API:send] Unauthorized access attempt - ` +
-          `User ${userId} tried to access campaign ${campaignId}`
+        `User ${userId} tried to access campaign ${campaignId}`
       );
       return errorResponse(
         'You do not have permission to send this campaign',
@@ -245,8 +221,7 @@ export async function POST(
         );
       }
 
-      // If status is 'sending' but no active job exists, the previous job may have
-      // failed or completed without updating the status. Check for pending emails.
+      // Status is 'sending' but no active job. Check for pending emails.
       console.log(`[API:send] Campaign status is 'sending' but no active job found. Checking for pending emails...`);
 
       const { count: stillPending } = await supabase
@@ -370,7 +345,7 @@ export async function POST(
     if (remainingQuota <= 0) {
       return errorResponse(
         `Daily sending limit reached (${dailyLimit} emails). ` +
-          `Upgrade your plan for higher limits.`,
+        `Upgrade your plan for higher limits.`,
         'DAILY_LIMIT_EXCEEDED',
         429,
         {
@@ -384,15 +359,14 @@ export async function POST(
     if (pendingEmails > remainingQuota) {
       console.warn(
         `[API:send] Campaign has ${pendingEmails} emails but only ` +
-          `${remainingQuota} remaining in daily quota`
+        `${remainingQuota} remaining in daily quota`
       );
-      // We still allow sending - it will just stop when limit is hit
-      // Alternative: Return error and require user to reduce recipients
+      // Allow sending, stop when limit is hit
     }
 
     console.log(
       `[API:send] Daily limit: ${emailsSentToday}/${dailyLimit} ` +
-        `(${remainingQuota} remaining)`
+      `(${remainingQuota} remaining)`
     );
 
     // ─────────────────────────────────────────────────────────
@@ -412,7 +386,7 @@ export async function POST(
     // ─────────────────────────────────────────────────────────
     // STEP 8: UPDATE CAMPAIGN STATUS
     // ─────────────────────────────────────────────────────────
-    // Mark as 'sending' so UI shows correct state
+    // Mark as 'sending' for UI state
 
     await supabase
       .from('campaigns')
@@ -428,7 +402,7 @@ export async function POST(
 
     console.log(
       `[API:send] Response time: ${responseTime}ms ` +
-        `(target: <${TARGET_RESPONSE_TIME_MS}ms)`
+      `(target: <${TARGET_RESPONSE_TIME_MS}ms)`
     );
 
     if (responseTime > TARGET_RESPONSE_TIME_MS) {
@@ -477,7 +451,7 @@ export async function POST(
  * GET /api/campaigns/[id]/send
  *
  * Gets the current send status of a campaign.
- * Useful for polling status or reconnecting after page refresh.
+ * Useful for polling or reconnecting.
  */
 export async function GET(
   request: NextRequest,
@@ -486,9 +460,11 @@ export async function GET(
   const campaignId = params.id;
 
   try {
-    // Authenticate
-    const session = await getServerSession();
-    if (!session?.user?.email) {
+    // Authenticate internal API calls
+    const authHeader = request.headers.get('authorization');
+    const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    if (!apiKey || apiKey !== process.env.BG_WORKER_API_KEY) {
       return errorResponse('Unauthorized', 'UNAUTHORIZED', 401);
     }
 
