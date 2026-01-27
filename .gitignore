@@ -48,3 +48,6 @@ next-env.d.ts
 *.temp
 
 
+
+# Local documentation
+debugging.md
