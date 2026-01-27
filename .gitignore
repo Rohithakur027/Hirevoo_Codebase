@@ -9,7 +9,6 @@ dist/
 
 # Environment files
 .env*
-!.env.example
 
 # IDE and OS files
 .vscode/
@@ -48,7 +47,4 @@ next-env.d.ts
 *.tmp
 *.temp
 
-# Local/Private documentation and settings
-.claude/
-GMAIL_WEBHOOK_IMPLEMENTATION.md
-emailfeature.md
+
