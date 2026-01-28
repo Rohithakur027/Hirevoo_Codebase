@@ -52,7 +52,12 @@ export class BgWorkerApi {
 
   constructor() {
     this.bgWorkerUrl = process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
-    this.appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    // Ensure appUrl uses www subdomain to avoid CORS issues
+    let appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    if (appUrl.includes('hirevoo.in') && !appUrl.includes('www.')) {
+      appUrl = appUrl.replace('://hirevoo.in', '://www.hirevoo.in');
+    }
+    this.appUrl = appUrl;
   }
 
   /**
