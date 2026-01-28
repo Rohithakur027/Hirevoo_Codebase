@@ -118,7 +118,7 @@ async function triggerHistorySync(email: string, historyId: string) {
 
     log(`Starting for ${email}, historyId: ${historyId}`);
 
-    const supabaseAdmin = createClient(
+    const supabaseAdmin = createClient<any>(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!
     );

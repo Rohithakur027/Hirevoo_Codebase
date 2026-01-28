@@ -4,7 +4,7 @@ import { decrypt } from "@/lib/encryption";
 import { getUTCTimeISO } from "@/lib/date-helpers";
 
 // Supabase client for token management
-const supabaseAdmin = createClient(
+const supabaseAdmin = createClient<any>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
