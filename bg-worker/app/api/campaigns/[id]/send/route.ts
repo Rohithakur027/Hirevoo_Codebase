@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { queueCampaignSend, getCampaignJobStatus } from '@/lib/queue/email-queue';
 import { isGmailConnected } from '@/lib/services/email-service';
 
@@ -37,13 +37,20 @@ const DAILY_LIMITS: Record<string, number> = {
 const TARGET_RESPONSE_TIME_MS = 300;
 
 // ============================================================
-// DATABASE CLIENT
+// DATABASE CLIENT (lazy initialization to avoid build-time errors)
 // ============================================================
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
-);
+let supabase: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient {
+  if (!supabase) {
+    supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
+    );
+  }
+  return supabase;
+}
 
 // ============================================================
 // TYPE DEFINITIONS
@@ -171,7 +178,7 @@ export async function POST(
     // STEP 2: VALIDATE CAMPAIGN EXISTS AND BELONGS TO USER
     // ─────────────────────────────────────────────────────────
 
-    const { data: campaign, error: campaignError } = await supabase
+    const { data: campaign, error: campaignError } = await getSupabase()
       .from('campaigns')
       .select('id, user_id, name, status')
       .eq('id', campaignId)
@@ -224,7 +231,7 @@ export async function POST(
       // Status is 'sending' but no active job. Check for pending emails.
       console.log(`[API:send] Campaign status is 'sending' but no active job found. Checking for pending emails...`);
 
-      const { count: stillPending } = await supabase
+      const { count: stillPending } = await getSupabase()
         .from('campaign_contacts')
         .select('*', { count: 'exact', head: true })
         .eq('campaign_id', campaignId)
@@ -233,7 +240,7 @@ export async function POST(
       if (stillPending === 0) {
         // No pending emails left, campaign should be marked as sent
         console.log(`[API:send] No pending emails, updating campaign status to 'sent'`);
-        await supabase
+        await getSupabase()
           .from('campaigns')
           .update({ status: 'sent', sent_at: new Date().toISOString() })
           .eq('id', campaignId);
@@ -277,7 +284,7 @@ export async function POST(
     // STEP 5: COUNT PENDING EMAILS
     // ─────────────────────────────────────────────────────────
 
-    const { count: pendingCount, error: countError } = await supabase
+    const { count: pendingCount, error: countError } = await getSupabase()
       .from('campaign_contacts')
       .select('*', { count: 'exact', head: true })
       .eq('campaign_id', campaignId)
@@ -313,7 +320,7 @@ export async function POST(
     today.setHours(0, 0, 0, 0);
 
     // First, get all campaign IDs for this user
-    const { data: userCampaigns, error: campaignsError } = await supabase
+    const { data: userCampaigns, error: campaignsError } = await getSupabase()
       .from('campaigns')
       .select('id')
       .eq('user_id', userId);
@@ -330,7 +337,7 @@ export async function POST(
     const campaignIds = userCampaigns?.map(c => c.id) || [];
 
     // Now count sent emails for this user's campaigns today
-    const { count: sentToday, error: limitError } = await supabase
+    const { count: sentToday, error: limitError } = await getSupabase()
       .from('campaign_contacts')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'sent')
@@ -388,7 +395,7 @@ export async function POST(
     // ─────────────────────────────────────────────────────────
     // Mark as 'sending' for UI state
 
-    await supabase
+    await getSupabase()
       .from('campaigns')
       .update({ status: 'sending' })
       .eq('id', campaignId);

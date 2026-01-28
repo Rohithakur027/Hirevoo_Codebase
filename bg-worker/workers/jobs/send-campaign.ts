@@ -79,27 +79,46 @@ interface EmailFailedEvent {
 }
 
 // ============================================================
-// DATABASE CLIENT
+// DATABASE CLIENT (lazy initialization to avoid build-time errors)
 // ============================================================
+
+import { SupabaseClient } from '@supabase/supabase-js';
+import type { Redis } from 'ioredis';
+
+let supabaseInstance: SupabaseClient | null = null;
 
 /**
  * Supabase client for database operations.
  * Uses service role key to bypass RLS.
+ * Lazy-loaded to avoid build-time errors.
  */
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
-);
+function getSupabase(): SupabaseClient {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
+    );
+  }
+  return supabaseInstance;
+}
 
 // ============================================================
-// REDIS PUB/SUB CLIENT
+// REDIS PUB/SUB CLIENT (lazy initialization)
 // ============================================================
+
+let publisherRedisInstance: Redis | null = null;
 
 /**
  * Dedicated Redis connection for publishing events.
  * Separate connection avoids blocking the main BullMQ connection.
+ * Lazy-loaded to avoid build-time errors.
  */
-const publisherRedis = createRedisConnection('worker-publisher');
+function getPublisherRedis(): Redis {
+  if (!publisherRedisInstance) {
+    publisherRedisInstance = createRedisConnection('worker-publisher');
+  }
+  return publisherRedisInstance;
+}
 
 // ============================================================
 // REDIS COMMAND OPTIMIZATION SETTINGS
@@ -213,7 +232,7 @@ export async function processCampaign(
     console.log(`${logPrefix} Query: campaign_id=${campaignId}, status=pending`);
 
     const fetchStartTime = Date.now();
-    const { data: pendingEmails, error: fetchError } = await supabase
+    const { data: pendingEmails, error: fetchError } = await getSupabase()
       .from('campaign_contacts')
       .select(`
         id,
@@ -614,7 +633,7 @@ async function updateCampaignStatus(
   }
 
   const updateStartTime = Date.now();
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('campaigns')
     .update(updateData)
     .eq('id', campaignId);
@@ -673,7 +692,7 @@ async function updateEmailStatus(
   }
 
   const updateStartTime = Date.now();
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('campaign_contacts')
     .update(updateData)
     .eq('id', emailId);
@@ -723,7 +742,7 @@ async function insertCampaignEmail(params: {
   console.log(`${logPrefix} Inserting into campaign_emails: gmailMessageId=${gmailMessageId}, gmailThreadId=${gmailThreadId}`);
 
   const insertStartTime = Date.now();
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('campaign_emails')
     .insert({
       campaign_id: campaignId,
@@ -800,7 +819,7 @@ async function createActivity(
   }
 
   const insertStartTime = Date.now();
-  const { error } = await supabase.from('activities').insert(activityData);
+  const { error } = await getSupabase().from('activities').insert(activityData);
 
   const insertDuration = Date.now() - insertStartTime;
   console.log(`${logPrefix} Activity insert completed in ${insertDuration}ms`);
@@ -847,7 +866,7 @@ async function publishEmailSentEvent(event: ProgressEvent): Promise<void> {
 
   try {
     const publishStartTime = Date.now();
-    await publisherRedis.publish('email:sent', JSON.stringify(event));
+    await getPublisherRedis().publish('email:sent', JSON.stringify(event));
     const publishDuration = Date.now() - publishStartTime;
     console.log(`[PubSub] ✅ Published email:sent event in ${publishDuration}ms`);
   } catch (error) {
@@ -879,7 +898,7 @@ async function publishEmailFailedEvent(event: EmailFailedEvent): Promise<void> {
 
   try {
     const publishStartTime = Date.now();
-    await publisherRedis.publish('email:failed', JSON.stringify(event));
+    await getPublisherRedis().publish('email:failed', JSON.stringify(event));
     const publishDuration = Date.now() - publishStartTime;
     console.log(`[PubSub] ✅ Published email:failed event in ${publishDuration}ms`);
   } catch (error) {
@@ -912,7 +931,7 @@ async function publishCampaignCompleteEvent(
 
   try {
     const publishStartTime = Date.now();
-    await publisherRedis.publish('campaign:complete', JSON.stringify(event));
+    await getPublisherRedis().publish('campaign:complete', JSON.stringify(event));
     const publishDuration = Date.now() - publishStartTime;
     console.log(`[PubSub] ✅ Published campaign:complete event in ${publishDuration}ms`);
   } catch (error) {
@@ -965,7 +984,7 @@ export async function processCampaignInBatches(
   // Get total count first
   console.log(`${logPrefix} Counting total pending emails for batch processing...`);
   const countStartTime = Date.now();
-  const { count: totalEmails, error: countError } = await supabase
+  const { count: totalEmails, error: countError } = await getSupabase()
     .from('campaign_contacts')
     .select('*', { count: 'exact', head: true })
     .eq('campaign_id', campaignId)
@@ -998,7 +1017,7 @@ export async function processCampaignInBatches(
       `${logPrefix} Fetching batch at offset ${offset} (${BATCH_SIZE} emails)`
     );
 
-    const { data: batch, error } = await supabase
+    const { data: batch, error } = await getSupabase()
       .from('campaign_contacts')
       .select('id, campaign_id, contact_id, recipient_email, recipient_name, email_subject, email_body, status')
       .eq('campaign_id', campaignId)

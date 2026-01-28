@@ -137,12 +137,21 @@ export function getEmailQueue(): Queue<SendCampaignJobData, SendCampaignJobResul
         },
       }
     );
+
+    // Register event listeners for debugging (only once when queue is created)
+    emailQueueInstance.on('waiting', (job) => {
+      console.log(`[Queue] Job ${job.id} is waiting`);
+    });
+
+    emailQueueInstance.on('error', (error) => {
+      console.error('[Queue] Queue error:', error.message);
+    });
   }
   return emailQueueInstance as Queue<SendCampaignJobData, SendCampaignJobResult>;
 }
 
-// For backward compatibility, export the lazy-loaded instance
-export const emailQueue = getEmailQueue();
+// NOTE: Do NOT export emailQueue at module level - it causes build errors.
+// Always use getEmailQueue() function instead.
 
 // ============================================================
 // QUEUE HELPER FUNCTIONS
@@ -190,7 +199,7 @@ export async function queueCampaignSend(
   const jobId = `campaign-${campaignId}`;
 
   // Check if this campaign already has an active job
-  const existingJob = await emailQueue.getJob(jobId);
+  const existingJob = await getEmailQueue().getJob(jobId);
 
   if (existingJob) {
     const state = await existingJob.getState();
@@ -229,7 +238,7 @@ export async function queueCampaignSend(
   // ─────────────────────────────────────────────────────────
   // STEP 3: ADD JOB TO QUEUE
   // ─────────────────────────────────────────────────────────
-  const job = await emailQueue.add(
+  const job = await getEmailQueue().add(
     'send-campaign', // Job name (for filtering/monitoring)
     jobData,
     {
@@ -253,7 +262,7 @@ export async function queueCampaignSend(
   // STEP 4: GET QUEUE POSITION
   // ─────────────────────────────────────────────────────────
   // This gives the user an idea of when their job will be processed
-  const waitingCount = await emailQueue.getWaitingCount();
+  const waitingCount = await getEmailQueue().getWaitingCount();
 
   console.log(
     `${logPrefix} ✅ Job queued successfully - ` +
@@ -283,7 +292,7 @@ export async function getCampaignJobStatus(campaignId: string): Promise<{
   timestamp: string;
 } | null> {
   const jobId = `campaign-${campaignId}`;
-  const job = await emailQueue.getJob(jobId);
+  const job = await getEmailQueue().getJob(jobId);
 
   if (!job) {
     return null;
@@ -316,7 +325,7 @@ export async function getCampaignJobStatus(campaignId: string): Promise<{
  */
 export async function cancelCampaignJob(campaignId: string): Promise<boolean> {
   const jobId = `campaign-${campaignId}`;
-  const job = await emailQueue.getJob(jobId);
+  const job = await getEmailQueue().getJob(jobId);
 
   if (!job) {
     console.log(`[Queue] Cancel requested but job ${jobId} not found`);
@@ -353,14 +362,15 @@ export async function getQueueHealth(): Promise<{
   delayed: number;
   isPaused: boolean;
 }> {
+  const queue = getEmailQueue();
   const [waiting, active, completed, failed, delayed, isPaused] =
     await Promise.all([
-      emailQueue.getWaitingCount(),
-      emailQueue.getActiveCount(),
-      emailQueue.getCompletedCount(),
-      emailQueue.getFailedCount(),
-      emailQueue.getDelayedCount(),
-      emailQueue.isPaused(),
+      queue.getWaitingCount(),
+      queue.getActiveCount(),
+      queue.getCompletedCount(),
+      queue.getFailedCount(),
+      queue.getDelayedCount(),
+      queue.isPaused(),
     ]);
 
   return {
@@ -378,7 +388,7 @@ export async function getQueueHealth(): Promise<{
  * Active jobs will complete.
  */
 export async function pauseQueue(): Promise<void> {
-  await emailQueue.pause();
+  await getEmailQueue().pause();
   console.log('[Queue] Email queue paused');
 }
 
@@ -386,7 +396,7 @@ export async function pauseQueue(): Promise<void> {
  * Resumes a paused queue.
  */
 export async function resumeQueue(): Promise<void> {
-  await emailQueue.resume();
+  await getEmailQueue().resume();
   console.log('[Queue] Email queue resumed');
 }
 
@@ -402,9 +412,10 @@ export async function cleanupOldJobs(
   completedRemoved: number;
   failedRemoved: number;
 }> {
+  const queue = getEmailQueue();
   const [completedRemoved, failedRemoved] = await Promise.all([
-    emailQueue.clean(olderThanMs, 1000, 'completed'),
-    emailQueue.clean(olderThanMs, 1000, 'failed'),
+    queue.clean(olderThanMs, 1000, 'completed'),
+    queue.clean(olderThanMs, 1000, 'failed'),
   ]);
 
   console.log(
@@ -421,14 +432,6 @@ export async function cleanupOldJobs(
 
 // ============================================================
 // QUEUE EVENT LOGGING (for debugging)
+// NOTE: Event listeners are registered lazily inside getEmailQueue()
+// to avoid build-time errors. See the getEmailQueue() function.
 // ============================================================
-
-// Log when jobs are waiting
-emailQueue.on('waiting', (job) => {
-  console.log(`[Queue] Job ${job.id} is waiting`);
-});
-
-// Log queue errors
-emailQueue.on('error', (error) => {
-  console.error('[Queue] Queue error:', error.message);
-});

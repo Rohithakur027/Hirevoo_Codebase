@@ -92,17 +92,27 @@ export type EmailErrorCode =
   | 'UNKNOWN_ERROR'; // Unexpected error
 
 // ============================================================
-// SUPABASE CLIENT
+// SUPABASE CLIENT (lazy initialization to avoid build-time errors)
 // ============================================================
+
+import { SupabaseClient } from '@supabase/supabase-js';
+
+let supabaseInstance: SupabaseClient | null = null;
 
 /**
  * Supabase client for database operations.
  * Uses service role key for server-side operations (bypasses RLS).
+ * Lazy-loaded to avoid build-time errors when env vars aren't available.
  */
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
-);
+function getSupabase(): SupabaseClient {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
+    );
+  }
+  return supabaseInstance;
+}
 
 // ============================================================
 // OAUTH2 CONFIGURATION
@@ -141,7 +151,7 @@ function createOAuth2Client() {
 async function getUserGmailTokens(userId: string): Promise<{
   refreshToken: string;
 } | null> {
-  const { data: user, error } = await supabase
+  const { data: user, error } = await getSupabase()
     .from('users')
     .select('gmail_refresh_token_IV, gmail_refresh_token_content, gmail_refresh_token_tag')
     .eq('id', userId)
@@ -214,7 +224,7 @@ async function getAccessToken(
 
     if (isInvalidGrant) {
       console.warn(`[EmailService] invalid_grant for user ${userId} — marking gmail_connected = false`);
-      await supabase
+      await getSupabase()
         .from('users')
         .update({ gmail_connected: false, updated_at: new Date().toISOString() })
         .eq('id', userId);

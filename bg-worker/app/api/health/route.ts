@@ -9,16 +9,23 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // ============================================================
-// DATABASE CLIENT
+// DATABASE CLIENT (lazy initialization)
 // ============================================================
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
-);
+let supabase: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient {
+  if (!supabase) {
+    supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
+    );
+  }
+  return supabase;
+}
 
 // ============================================================
 // HEALTH CHECK FUNCTIONS
@@ -75,9 +82,9 @@ async function checkRedis(): Promise<HealthCheckResult> {
  */
 async function checkSupabase(): Promise<HealthCheckResult> {
   const start = Date.now();
-  
+
   try {
-    const { error } = await supabase
+    const { error } = await getSupabase()
       .from('users')
       .select('count')
       .limit(1)
