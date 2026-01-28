@@ -14,15 +14,23 @@ import { authOptions } from '@/lib/auth';
 import { getUTCTimeISO } from '@/lib/date-helpers';
 
 // ============================================================
-// DATABASE CLIENT (Global Instance)
+// DATABASE CLIENT (Lazy initialization)
 // ============================================================
 
-// This instance is created once and reused. 
-// It uses the Service Role Key, so it bypasses RLS.
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[API:send] CRITICAL: Missing Supabase environment variables!', {
+      hasUrl: !!supabaseUrl,
+      hasKey: !!supabaseKey
+    });
+    throw new Error('Missing Supabase configuration');
+  }
+
+  return createClient(supabaseUrl, supabaseKey);
+}
 
 // ============================================================
 // CONFIGURATION
@@ -82,7 +90,7 @@ async function checkAndRecoverStuckCampaign(
 
   // Try to check bg-worker job status
   try {
-    const bgWorkerUrl = process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
+    const bgWorkerUrl = process.env.BG_WORKER_URL || process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
     const jobStatusResponse = await fetch(`${bgWorkerUrl}/api/campaigns/${campaignId}/send`, {
       method: 'GET',
       headers: {
@@ -131,7 +139,7 @@ async function checkAndRecoverStuckCampaign(
 /**
  * Resets a stuck campaign to 'ready' status and resets pending contacts
  */
-async function resetStuckCampaign(campaignId: string): Promise<void> {
+async function resetStuckCampaign(campaignId: string, supabase: ReturnType<typeof createClient>): Promise<void> {
   console.log(`[API:send] Resetting stuck campaign ${campaignId}...`);
 
   // Reset campaign status to 'ready'
@@ -197,6 +205,9 @@ export async function POST(
   console.log(`[API:send] Processing send request for campaign: ${campaignId}`);
 
   try {
+    // Initialize Supabase client
+    const supabase = getSupabaseClient();
+
     // ─────────────────────────────────────────────────────────
     // STEP 1: AUTHENTICATE USER
     // ─────────────────────────────────────────────────────────
@@ -213,7 +224,6 @@ export async function POST(
       );
     }
 
-    // [FIX]: This now correctly uses the global 'supabase' variable defined at the top
     const { data: dbUser, error: dbUserError } = await supabase
       .from('users')
       .select('id, plan')
@@ -233,9 +243,6 @@ export async function POST(
     const userPlan = dbUser.plan || 'free';
 
     console.log(`[API:send] Database User ID: ${userId}, Plan: ${userPlan}`);
-
-    // [FIX]: REMOVED REDUNDANT 'const supabase = ...' HERE
-    // This was causing the ReferenceError by shadowing the global variable.
 
     // ─────────────────────────────────────────────────────────
     // STEP 2: VALIDATE CAMPAIGN EXISTS AND BELONGS TO USER
@@ -282,7 +289,7 @@ export async function POST(
         console.log(`[API:send] Campaign is stuck: ${reason}. Attempting recovery...`);
 
         try {
-          await resetStuckCampaign(campaignId);
+          await resetStuckCampaign(campaignId, supabase);
           console.log(`[API:send] Successfully recovered stuck campaign. Proceeding with send...`);
           // Continue with the send flow - campaign is now 'ready'
         } catch (resetError) {
@@ -466,7 +473,9 @@ export async function POST(
     console.log(`[API:send] Queuing campaign...`);
 
     // Queue job to bg-worker via internal API call
-    const bgWorkerUrl = process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
+    const bgWorkerUrl = process.env.BG_WORKER_URL || process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
+    console.log(`[API:send] BG_WORKER_URL env:`, process.env.BG_WORKER_URL);
+    console.log(`[API:send] Using bgWorkerUrl:`, bgWorkerUrl);
 
     // Note: Ensure your bg-worker endpoint allows POST requests and handles the body correctly
     const queueResponse = await fetch(`${bgWorkerUrl}/api/campaigns/${campaignId}/send`, {
@@ -519,10 +528,12 @@ export async function POST(
 
   } catch (error) {
     console.error('[API:send] Unexpected error:', error);
+    console.error('[API:send] Error stack:', error instanceof Error ? error.stack : 'No stack');
     return errorResponse(
       'An unexpected error occurred',
       'INTERNAL_ERROR',
-      500
+      500,
+      { message: error instanceof Error ? error.message : String(error) }
     );
   }
 }
