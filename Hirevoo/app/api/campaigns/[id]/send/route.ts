@@ -29,7 +29,7 @@ function getSupabaseClient() {
     throw new Error('Missing Supabase configuration');
   }
 
-  return createClient(supabaseUrl, supabaseKey);
+  return createClient<any>(supabaseUrl, supabaseKey);
 }
 
 // ============================================================
@@ -148,7 +148,7 @@ async function resetStuckCampaign(campaignId: string, supabase: ReturnType<typeo
     .update({
       status: 'ready',
       updated_at: getUTCTimeISO()
-    } as { status: string; updated_at: string })
+    })
     .eq('id', campaignId);
 
   if (campaignError) {
@@ -162,7 +162,7 @@ async function resetStuckCampaign(campaignId: string, supabase: ReturnType<typeo
     .update({
       status: 'pending',
       error_message: null
-    } as { status: string; error_message: null })
+    })
     .eq('campaign_id', campaignId)
     .neq('status', 'sent'); // Only reset non-sent contacts
 
@@ -327,7 +327,7 @@ export async function POST(
         console.log(`[API:send] Campaign marked as 'sent' but has ${remainingPending} pending contacts. Resetting...`);
         await supabase
           .from('campaigns')
-          .update({ status: 'ready', updated_at: getUTCTimeISO() } as { status: string; updated_at: string })
+          .update({ status: 'ready', updated_at: getUTCTimeISO() })
           .eq('id', campaignId);
         // Continue with send
       } else {
@@ -510,7 +510,7 @@ export async function POST(
     // Mark as 'sending' so UI shows correct state
     await supabase
       .from('campaigns')
-      .update({ status: 'sending' } as { status: string })
+      .update({ status: 'sending' })
       .eq('id', campaignId);
 
     // ─────────────────────────────────────────────────────────
