@@ -188,7 +188,7 @@ worker.on('active', (job: Job) => {
   console.log(`[Worker] Job ${job.id} is now active`);
 });
 
-worker.on('progress', (job: Job, progress: number | object) => {
+worker.on('progress', (job, progress) => {
   const progressData = typeof progress === 'object' ? progress : { percentage: progress };
   const pct = typeof progress === 'object' && 'percentage' in progress ? (progress as { percentage: number }).percentage : 0;
   // Only log at 25% intervals
