@@ -51,7 +51,7 @@ export class BgWorkerApi {
   private appUrl: string;
 
   constructor() {
-    this.bgWorkerUrl = process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
+    this.bgWorkerUrl = process.env.BG_WORKER_URL || 'http://localhost:3001';
     // Ensure appUrl uses www subdomain to avoid CORS issues
     let appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     if (appUrl.includes('hirevoo.in') && !appUrl.includes('www.')) {

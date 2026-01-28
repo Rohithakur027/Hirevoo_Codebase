@@ -473,7 +473,7 @@ export async function POST(
     console.log(`[API:send] Queuing campaign...`);
 
     // Queue job to bg-worker via internal API call
-    const bgWorkerUrl = process.env.BG_WORKER_URL || process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
+    const bgWorkerUrl = process.env.BG_WORKER_URL || 'http://localhost:3001';
     console.log(`[API:send] BG_WORKER_URL env:`, process.env.BG_WORKER_URL);
     console.log(`[API:send] Using bgWorkerUrl:`, bgWorkerUrl);
 

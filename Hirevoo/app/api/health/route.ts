@@ -70,7 +70,7 @@ async function checkSupabase(): Promise<HealthCheckResult> {
  * Check background worker service connectivity
  */
 async function checkBgWorker(): Promise<HealthCheckResult> {
-  const bgWorkerUrl = process.env.BG_WORKER_URL || process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001';
+  const bgWorkerUrl = process.env.BG_WORKER_URL || 'http://localhost:3001';
   const start = Date.now();
 
   try {
@@ -133,7 +133,7 @@ function checkEnvironment(): HealthCheckResult {
     status: 'healthy',
     details: {
       configured: requiredEnvVars.length,
-      bgWorkerUrl: process.env.BG_WORKER_URL || process.env.NEXT_PUBLIC_BG_WORKER_URL || 'http://localhost:3001',
+      bgWorkerUrl: process.env.BG_WORKER_URL || 'http://localhost:3001',
     },
   };
 }
@@ -179,8 +179,8 @@ export async function GET(request: NextRequest) {
   };
 
   // Return appropriate status code
-  const statusCode = overallStatus === 'healthy' ? 200 : 
-                     overallStatus === 'degraded' ? 200 : 503;
+  const statusCode = overallStatus === 'healthy' ? 200 :
+    overallStatus === 'degraded' ? 200 : 503;
 
   return NextResponse.json(response, { status: statusCode });
 }
