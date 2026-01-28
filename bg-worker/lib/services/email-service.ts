@@ -8,9 +8,6 @@
  * - Max email size: 25MB
  */
 
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
-
 import { google, gmail_v1 } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 import { decrypt } from '../encryption';
