@@ -162,6 +162,9 @@ function validateRedisUrl(): string {
  */
 export function createRedisConnection(connectionName?: string): Redis {
   const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    throw new Error('REDIS_URL environment variable is not set');
+  }
 
   const connection = new Redis(redisUrl, {
     ...redisOptions,
