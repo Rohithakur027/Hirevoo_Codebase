@@ -143,7 +143,9 @@ queueEvents.on('waiting', ({ jobId }) => {
 });
 
 queueEvents.on('completed', ({ jobId, returnvalue }) => {
-  const result = returnvalue as SendCampaignJobResult;
+  const result = typeof returnvalue === 'string'
+    ? JSON.parse(returnvalue) as SendCampaignJobResult
+    : returnvalue as SendCampaignJobResult;
   console.log(
     `[QueueEvents] Job ${jobId} completed - ` +
       `Sent: ${result?.successCount || 0}, Failed: ${result?.failureCount || 0}`
