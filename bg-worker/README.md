@@ -1,6 +1,6 @@
 # Hirevoo Background Worker System
 
-A production-grade background worker system for processing email campaigns asynchronously using BullMQ, Redis, and Socket.IO.
+A production-grade background worker system for processing email campaigns asynchronously using BullMQ and Redis.
 
 ## Table of Contents
 
@@ -9,9 +9,8 @@ A production-grade background worker system for processing email campaigns async
 3. [Complete Flow](#complete-flow)
 4. [Real-Life Examples](#real-life-examples)
 5. [How to Run](#how-to-run)
-6. [Client Integration](#client-integration)
-7. [Troubleshooting](#troubleshooting)
-8. [Production Deployment](#production-deployment)
+6. [Troubleshooting](#troubleshooting)
+7. [Production Deployment](#production-deployment)
 
 ---
 
@@ -23,8 +22,7 @@ When a user clicks "Send Campaign" in Hirevoo:
 
 1. **Instant Response**: The user gets confirmation within 300ms
 2. **Background Processing**: A separate worker process sends emails over 10-15 minutes
-3. **Real-Time Updates**: The user sees live progress updates via WebSocket
-4. **Reliability**: If the worker crashes, BullMQ automatically retries the job
+3. **Reliability**: If the worker crashes, BullMQ automatically retries the job
 
 ### Why Background Workers?
 
@@ -36,7 +34,7 @@ This system works the same way:
 - **API Route** = Waiter (takes order, responds instantly)
 - **Redis Queue** = Order tickets hanging in the kitchen
 - **Worker Process** = Kitchen staff (processes orders in background)
-- **Socket.IO** = Bell that dings when your order is ready
+- **Redis Pub/Sub** = Bell that dings when your order is ready
 
 ---
 
@@ -49,27 +47,23 @@ This system works the same way:
 │  1. Click "Send Campaign"                                                   │
 │  2. Get instant response (< 300ms)                                          │
 │  3. Can close browser - emails still send!                                  │
-│  4. Optional: Keep browser open for real-time progress bar                  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     │ HTTP POST /api/campaigns/[id]/send
-                                    │ WebSocket (Socket.IO)
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                    TERMINAL 1: NEXT.JS PROCESS                              │
 │                         (npm run dev)                                       │
 │                                                                             │
-│  ┌───────────────────────┐    ┌───────────────────────┐                    │
-│  │   API Route           │    │   Socket.IO Server    │                    │
-│  │                       │    │                       │                    │
-│  │ - Validates request   │    │ - Accepts WebSocket   │                    │
-│  │ - Checks permissions  │    │   connections         │                    │
-│  │ - Queues job to Redis │    │ - Subscribes to       │                    │
-│  │ - Returns job ID      │    │   Redis Pub/Sub       │                    │
-│  └───────────────────────┘    │ - Broadcasts to       │                    │
-│                               │   user's browser      │                    │
-│                               └───────────────────────┘                    │
+│  ┌───────────────────────┐                                                 │
+│  │   API Route           │                                                 │
+│  │                       │                                                 │
+│  │ - Validates request   │                                                 │
+│  │ - Checks permissions  │                                                 │
+│  │ - Queues job to Redis │                                                 │
+│  │ - Returns job ID      │                                                 │
+│  └───────────────────────┘                                                 │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -127,9 +121,6 @@ hirevoo/
 │   ├── queue/
 │   │   ├── config.ts                    # Redis connection setup
 │   │   └── email-queue.ts               # BullMQ queue configuration
-│   │
-│   ├── socket/
-│   │   └── server.ts                    # Socket.IO + Pub/Sub subscriber
 │   │
 │   └── services/
 │       └── email-service.ts             # Gmail API wrapper
@@ -305,27 +296,7 @@ WHERE id = 'email-1'
 
 ---
 
-#### Step 8: Socket.IO Broadcasts to Browser (2:00:00.850 PM)
-
-**Location:** `lib/socket/server.ts`
-
-**What happens:**
-1. Redis subscriber receives `email:sent` event
-2. Parse JSON data
-3. Find user's Socket.IO room: `user:user-abc`
-4. Emit event to room
-
-**Browser receives:**
-```javascript
-socket.on('email:sent', (data) => {
-  // data.progress = 33
-  // Update progress bar from 0% to 33%
-});
-```
-
----
-
-#### Step 9: Rate Limit Delay (2:00:00.850 PM → 2:00:01.050 PM)
+#### Step 8: Rate Limit Delay (2:00:00.850 PM → 2:00:01.050 PM)
 
 **Location:** `workers/jobs/send-campaign.ts`
 
@@ -336,7 +307,7 @@ await delay(200); // Respect Gmail rate limits
 
 ---
 
-#### Step 10: Send Email 2 (2:00:01.050 PM → 2:00:01.550 PM)
+#### Step 9: Send Email 2 (2:00:01.050 PM → 2:00:01.550 PM)
 
 Similar to Step 7, but for the second email.
 
@@ -349,7 +320,7 @@ Similar to Step 7, but for the second email.
 
 ---
 
-#### Step 11: Send Email 3 (2:00:01.750 PM → 2:00:02.250 PM)
+#### Step 10: Send Email 3 (2:00:01.750 PM → 2:00:02.250 PM)
 
 Similar to Step 7, but for the third email.
 
@@ -362,7 +333,7 @@ Similar to Step 7, but for the third email.
 
 ---
 
-#### Step 12: Campaign Complete (2:00:02.300 PM)
+#### Step 11: Campaign Complete (2:00:02.300 PM)
 
 **Location:** `workers/jobs/send-campaign.ts`
 
@@ -397,20 +368,6 @@ WHERE id = 'abc123'
    Duration: 2 seconds
 ────────────────────────────────────
 ```
-
----
-
-#### Step 13: Browser Shows Completion (2:00:02.350 PM)
-
-**Browser receives:**
-```javascript
-socket.on('campaign:complete', (data) => {
-  // Show success message
-  // Update UI to show campaign sent
-});
-```
-
-**Total time:** 2.35 seconds (from button click to completion)
 
 ---
 
@@ -523,7 +480,7 @@ email-33 | failed  | Gmail rejected recipient
 ### Step 1: Install Dependencies
 
 ```bash
-npm install bullmq ioredis socket.io socket.io-client googleapis @supabase/supabase-js tsx
+npm install bullmq ioredis googleapis @supabase/supabase-js tsx
 ```
 
 ### Step 2: Set Up Environment Variables
@@ -603,141 +560,6 @@ Expected output:
 
 ---
 
-## Client Integration
-
-### Connecting to Socket.IO for Real-Time Updates
-
-```typescript
-// hooks/useCampaignProgress.ts
-import { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-
-interface CampaignProgress {
-  progress: number;
-  sent: number;
-  failed: number;
-  total: number;
-  isComplete: boolean;
-}
-
-export function useCampaignProgress(
-  userId: string,
-  campaignId: string
-): CampaignProgress {
-  const [progress, setProgress] = useState<CampaignProgress>({
-    progress: 0,
-    sent: 0,
-    failed: 0,
-    total: 0,
-    isComplete: false,
-  });
-
-  useEffect(() => {
-    // Connect to Socket.IO server
-    const socket: Socket = io({
-      auth: { userId },
-      transports: ['websocket', 'polling'],
-    });
-
-    // Handle connection
-    socket.on('connected', (data) => {
-      console.log('Connected to server:', data);
-      // Subscribe to this specific campaign
-      socket.emit('subscribe:campaign', campaignId);
-    });
-
-    // Handle email sent events
-    socket.on('email:sent', (data) => {
-      if (data.campaignId === campaignId) {
-        setProgress({
-          progress: data.progress,
-          sent: data.sent,
-          failed: data.failed,
-          total: data.total,
-          isComplete: false,
-        });
-      }
-    });
-
-    // Handle email failed events
-    socket.on('email:failed', (data) => {
-      if (data.campaignId === campaignId) {
-        console.warn('Email failed:', data.recipientEmail, data.error);
-      }
-    });
-
-    // Handle campaign complete
-    socket.on('campaign:complete', (data) => {
-      if (data.campaignId === campaignId) {
-        setProgress((prev) => ({
-          ...prev,
-          isComplete: true,
-        }));
-      }
-    });
-
-    // Cleanup on unmount
-    return () => {
-      socket.emit('unsubscribe:campaign', campaignId);
-      socket.disconnect();
-    };
-  }, [userId, campaignId]);
-
-  return progress;
-}
-```
-
-### Using the Hook in a Component
-
-```tsx
-// components/CampaignProgressBar.tsx
-import { useCampaignProgress } from '@/hooks/useCampaignProgress';
-
-export function CampaignProgressBar({
-  userId,
-  campaignId,
-}: {
-  userId: string;
-  campaignId: string;
-}) {
-  const { progress, sent, failed, total, isComplete } = useCampaignProgress(
-    userId,
-    campaignId
-  );
-
-  if (isComplete) {
-    return (
-      <div className="bg-green-100 p-4 rounded">
-        <h3>Campaign Complete!</h3>
-        <p>
-          {sent} sent, {failed} failed out of {total} total
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex justify-between">
-        <span>Sending emails...</span>
-        <span>{progress}%</span>
-      </div>
-      <div className="w-full bg-gray-200 rounded h-2">
-        <div
-          className="bg-blue-500 h-2 rounded transition-all duration-300"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-      <p className="text-sm text-gray-600">
-        {sent} sent, {failed} failed of {total}
-      </p>
-    </div>
-  );
-}
-```
-
----
-
 ## Troubleshooting
 
 ### Problem: Worker Not Picking Up Jobs
@@ -785,35 +607,6 @@ const jobId = `campaign-${campaignId}`;
 
 ---
 
-### Problem: Socket.IO Not Receiving Updates
-
-**Symptoms:**
-- Emails send successfully (see worker logs)
-- Browser doesn't show progress updates
-
-**Solutions:**
-
-1. **Check Socket.IO connection:**
-   ```javascript
-   // In browser console
-   socket.on('connect', () => console.log('Connected!'));
-   socket.on('connect_error', (err) => console.error('Error:', err));
-   ```
-
-2. **Verify user ID matches:**
-   ```javascript
-   // Client must connect with same userId as the campaign owner
-   const socket = io({ auth: { userId: currentUser.id } });
-   ```
-
-3. **Check Redis Pub/Sub subscription:**
-   ```
-   # In Next.js terminal, you should see:
-   [Redis PubSub] ✅ Subscribed to 3 channels
-   ```
-
----
-
 ### Problem: Gmail API Rate Limit Errors
 
 **Symptoms:**
@@ -852,7 +645,7 @@ await delay(500); // Increase from 200ms to 500ms
 ┌─────────────────────────────────────────────────────────────────┐
 │                        VERCEL                                   │
 │                                                                 │
-│   Next.js Application (API routes, Socket.IO initialization)   │
+│   Next.js Application (API routes)                             │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                                 │

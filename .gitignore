@@ -50,4 +50,5 @@ next-env.d.ts
 
 
 # Local documentation
-debugging.md
+*.md
+!read.md

@@ -1,58 +1,67 @@
-// IMPORTANT: Load environment variables FIRST before any other imports
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
+// IMPORTANT: Load environment variables FIRST before any other imports.
+// In production (Render), env vars are injected natively so dotenv is optional.
+try {
+  const dotenv = require('dotenv');
+  dotenv.config({ path: '.env.local' });
+} catch {
+  // dotenv not available or .env.local missing — fine in production
+}
 
 /**
  * workers/index.ts
  *
  * Purpose: Main worker process entry point for background email processing
  *
- * This file runs as a separate Node.js process (Terminal 2) and is responsible
+ * This file runs as a separate Node.js process and is responsible
  * for picking up jobs from the BullMQ queue and processing them. It runs
  * independently of the Next.js application.
+ *
+ * On Render, this runs as a Web Service with a keep-alive HTTP server
+ * so the free tier does not kill the process.
  *
  * How to run:
  *   Development: npm run worker (uses tsx watch for hot reload)
  *   Production:  npm run worker:prod
  *
- * Architecture:
- * ┌─────────────────────────────────────────────────────────────┐
- * │                    WORKER PROCESS                           │
- * │                                                             │
- * │  ┌─────────────────┐    ┌─────────────────┐                │
- * │  │  BullMQ Worker  │    │  QueueEvents    │                │
- * │  │  (processes     │    │  (monitors      │                │
- * │  │   jobs)         │    │   queue)        │                │
- * │  └─────────────────┘    └─────────────────┘                │
- * │           │                                                 │
- * │           ▼                                                 │
- * │  ┌─────────────────────────────────────┐                   │
- * │  │  processCampaign()                  │                   │
- * │  │  (business logic in send-campaign)  │                   │
- * │  └─────────────────────────────────────┘                   │
- * │                                                             │
- * └─────────────────────────────────────────────────────────────┘
- *                              │
- *                              │ Redis
- *                              ▼
- *                       ┌─────────────┐
- *                       │   Upstash   │
- *                       │   Redis     │
- *                       └─────────────┘
- *
- * Key Responsibilities:
- * 1. Create BullMQ Worker instance to process jobs
- * 2. Handle worker lifecycle events (completed, failed, error)
- * 3. Implement graceful shutdown on SIGTERM/SIGINT
- * 4. Log all activity for monitoring and debugging
- *
  * @module workers/index
  */
 
+import http from 'http';
 import { Worker, QueueEvents, Job } from 'bullmq';
 import { getRedis, closeRedisConnection } from '../lib/queue/config';
 import { processCampaign, processCampaignInBatches } from './jobs/send-campaign';
 import type { SendCampaignJobData, SendCampaignJobResult } from '../lib/queue/email-queue';
+
+// ============================================================
+// RENDER KEEP-ALIVE HTTP SERVER
+// ============================================================
+// Render's free-tier Web Services must bind to a port and respond
+// to HTTP requests, otherwise Render kills the process after the
+// deploy health check times out. This minimal server satisfies
+// that requirement and doubles as a health check endpoint for
+// UptimeRobot (which pings every 5 min to prevent sleeping).
+
+const PORT = process.env.PORT || 10000;
+
+const httpServer = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      service: 'bg-worker',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    }));
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Hirevoo Background Worker is running.');
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`[HTTP] Keep-alive server listening on port ${PORT}`);
+});
 
 // Get the Redis connection once at startup
 const redis = getRedis();
@@ -404,6 +413,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
   clearInterval(healthCheckTimer);
 
   try {
+    // Close HTTP keep-alive server
+    console.log('[Shutdown] Closing HTTP server...');
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    console.log('[Shutdown] HTTP server closed');
+
     // Close the worker (waits for current jobs to complete)
     console.log('[Shutdown] Closing worker...');
     await worker.close();

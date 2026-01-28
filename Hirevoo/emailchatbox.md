@@ -51,9 +51,9 @@ To handle millions of emails efficiently:
     -   Cache the "latest conversation view" in Redis. Invalidate/Update cache only when a new message arrives.
     -   This reduces load on the primary database for frequent viewings.
 
-### 2.3 Real-Time Updates (Sockets)
--   **WebSockets (Socket.io / Pusher)**:
-    -   Instead of polling, establish a WebSocket connection.
+### 2.3 Real-Time Updates
+-   **WebSockets / Server-Sent Events**:
+    -   Instead of polling, establish a real-time connection.
     -   Push a "New Message" event or "Status Update" (Read Receipt) event instantly to the client to update the UI (turn gray ticks blue) without refreshing.
 
 ### 2.4 Security

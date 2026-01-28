@@ -830,9 +830,6 @@ async function createActivity(
 /**
  * Publishes an email sent event to Redis Pub/Sub.
  *
- * The Socket.IO server in the Next.js process subscribes to this
- * channel and broadcasts to connected clients for real-time updates.
- *
  * @param event - Event data to publish
  */
 async function publishEmailSentEvent(event: ProgressEvent): Promise<void> {

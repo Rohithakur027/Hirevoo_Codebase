@@ -113,12 +113,6 @@ export class BgWorkerApi {
     return data as CampaignJobStatus;
   }
 
-  /**
-   * Get the Socket.IO server URL for real-time updates.
-   */
-  getSocketUrl(): string {
-    return process.env.NEXT_PUBLIC_BG_WORKER_SOCKET_URL || this.bgWorkerUrl;
-  }
 }
 
 // ============================================================
