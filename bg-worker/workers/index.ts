@@ -1,29 +1,14 @@
-// IMPORTANT: Load environment variables FIRST before any other imports.
-// In production (Render), env vars are injected natively so dotenv is optional.
+// Load env vars first - optional in production (Render injects them)
 try {
   const dotenv = require('dotenv');
   dotenv.config({ path: '.env.local' });
 } catch {
-  // dotenv not available or .env.local missing — fine in production
+  // OK in production
 }
 
 /**
- * workers/index.ts
- *
- * Purpose: Main worker process entry point for background email processing
- *
- * This file runs as a separate Node.js process and is responsible
- * for picking up jobs from the BullMQ queue and processing them. It runs
- * independently of the Next.js application.
- *
- * On Render, this runs as a Web Service with a keep-alive HTTP server
- * so the free tier does not kill the process.
- *
- * How to run:
- *   Development: npm run worker (uses tsx watch for hot reload)
- *   Production:  npm run worker:prod
- *
- * @module workers/index
+ * Background worker entry point - processes email jobs from BullMQ.
+ * Runs as separate process with HTTP keep-alive for Render free tier.
  */
 
 import http from 'http';
@@ -32,14 +17,7 @@ import { getRedis, closeRedisConnection } from '../lib/queue/config';
 import { processCampaign, processCampaignInBatches } from './jobs/send-campaign';
 import type { SendCampaignJobData, SendCampaignJobResult } from '../lib/queue/email-queue';
 
-// ============================================================
-// RENDER KEEP-ALIVE HTTP SERVER
-// ============================================================
-// Render's free-tier Web Services must bind to a port and respond
-// to HTTP requests, otherwise Render kills the process after the
-// deploy health check times out. This minimal server satisfies
-// that requirement and doubles as a health check endpoint for
-// UptimeRobot (which pings every 5 min to prevent sleeping).
+// Keep-alive HTTP server for Render free tier + health checks
 
 const PORT = process.env.PORT || 10000;
 
@@ -63,43 +41,15 @@ httpServer.listen(PORT, () => {
   console.log(`[HTTP] Keep-alive server listening on port ${PORT}`);
 });
 
-// Get the Redis connection once at startup
 const redis = getRedis();
-
-// ============================================================
-// CONFIGURATION
-// ============================================================
-
-/**
- * Worker configuration constants.
- * Adjust these based on your infrastructure and Gmail API limits.
- */
 const CONFIG = {
-  // Queue name must match the one in email-queue.ts
   QUEUE_NAME: 'emails',
-
-  // How many jobs to process simultaneously
-  // Higher = more throughput, but more Gmail API load
-  // Recommendation: Start with 1, increase after testing
   CONCURRENCY: 1,
-
-  // Maximum job duration before considering it stalled (ms)
-  // Set high for large campaigns
-  LOCK_DURATION: 1800000, // 30 minutes
-
-  // How often to renew the lock on active jobs (ms)
-  LOCK_RENEW_TIME: 60000, // 1 minute
-
-  // Redis key prefix (must match email-queue.ts)
+  LOCK_DURATION: 1800000, // 30 min
+  LOCK_RENEW_TIME: 60000, // 1 min
   PREFIX: 'bull:hirevoo',
-
-  // Threshold for using batch processing
   BATCH_THRESHOLD: 500,
 };
-
-// ============================================================
-// STARTUP BANNER
-// ============================================================
 
 console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
@@ -118,24 +68,8 @@ console.log(`
 
 `);
 
-// ============================================================
-// WORKER CREATION
-// ============================================================
-
-/**
- * Main BullMQ Worker instance.
- *
- * The worker continuously polls Redis for new jobs and processes them
- * using the provided callback function.
- */
 const worker = new Worker<SendCampaignJobData, SendCampaignJobResult>(
   CONFIG.QUEUE_NAME,
-
-  // ─────────────────────────────────────────────────────────
-  // JOB PROCESSOR FUNCTION
-  // ─────────────────────────────────────────────────────────
-  // This function is called for each job. It receives the job
-  // and must return a result or throw an error.
   async (job: Job<SendCampaignJobData, SendCampaignJobResult>) => {
     const startTime = Date.now();
     const logPrefix = `[Worker][Job:${job.id}]`;
@@ -153,8 +87,6 @@ ${logPrefix} 📥 Job received
 `);
 
     try {
-      // Determine if we should use batch processing
-      // (for large campaigns to manage memory)
       const result = await processCampaign(job);
 
       const duration = Date.now() - startTime;
@@ -180,108 +112,36 @@ ${logPrefix} ❌ Job failed
 ────────────────────────────────────────────────────────────────
 `);
 
-      // Re-throw to trigger BullMQ retry mechanism
       throw error;
     }
   },
 
-  // ─────────────────────────────────────────────────────────
-  // WORKER OPTIONS (OPTIMIZED FOR UPSTASH FREE TIER)
-  // ─────────────────────────────────────────────────────────
+  // Optimized for Upstash free tier
   {
-    // Use our configured Redis connection
     connection: redis,
-
-    // Number of jobs to process simultaneously
     concurrency: CONFIG.CONCURRENCY,
-
-    // Redis key prefix
     prefix: CONFIG.PREFIX,
-
-    // Lock settings to prevent job duplication
     lockDuration: CONFIG.LOCK_DURATION,
     lockRenewTime: CONFIG.LOCK_RENEW_TIME,
-
-    // =========================================================
-    // POLLING OPTIMIZATION (CRITICAL FOR UPSTASH FREE TIER)
-    // =========================================================
-    // drainDelay: How long to wait before polling when queue is empty
-    // DEFAULT is 5ms (!!) which causes ~200 commands/second when idle!
-    // Setting to 10 seconds reduces idle polling to ~6 commands/minute
-    drainDelay: 10000, // 10 seconds (10000ms) between polls when queue is empty
-
-    // =========================================================
-    // STALLED JOB SETTINGS (REDUCED FREQUENCY)
-    // =========================================================
-    // stalledInterval: How often to check for stalled jobs
-    // DEFAULT is 30 seconds which is too aggressive for free tier
-    // 5 minutes is sufficient for most use cases
-    stalledInterval: 300000, // 5 minutes (was 30 seconds)
-    maxStalledCount: 2, // Allow 2 stalls before marking as failed
-
-    // =========================================================
-    // JOB CLEANUP SETTINGS (PREVENT STORAGE BLOAT)
-    // =========================================================
-    // Automatically remove completed/failed jobs to save storage
-    // and reduce Redis memory usage
-    removeOnComplete: {
-      count: 100, // Keep last 100 completed jobs for debugging
-      age: 24 * 3600, // Remove jobs older than 24 hours
-    },
-    removeOnFail: {
-      count: 50, // Keep last 50 failed jobs for analysis
-      age: 7 * 24 * 3600, // Keep failed jobs for 7 days
-    },
-
-    // =========================================================
-    // RATE LIMITING (OPTIONAL - EXTRA PROTECTION)
-    // =========================================================
-    // Uncomment if you want to limit job processing rate
-    // limiter: {
-    //   max: 10, // Max 10 jobs
-    //   duration: 1000, // Per second
-    // },
-
-    // Metrics collection disabled to reduce overhead
-    // Uncomment if you need monitoring metrics
-    // metrics: {
-    //   maxDataPoints: 1000,
-    // },
+    drainDelay: 10000, // 10s poll interval when idle (default 5ms burns quota)
+    stalledInterval: 300000, // 5 min
+    maxStalledCount: 2,
+    removeOnComplete: { count: 100, age: 24 * 3600 },
+    removeOnFail: { count: 50, age: 7 * 24 * 3600 },
   }
 );
 
-// ============================================================
-// QUEUE EVENTS LISTENER
-// ============================================================
-
-/**
- * QueueEvents provides advanced monitoring capabilities.
- *
- * Unlike worker events (which fire only for jobs processed by THIS worker),
- * QueueEvents fires for ALL jobs in the queue, regardless of which worker
- * processes them. Useful for dashboards and monitoring.
- *
- * NOTE: QueueEvents uses Redis XREAD blocking commands which consume
- * Redis commands on each poll. For Upstash free tier, we increase the
- * blockingTimeout significantly to reduce polling frequency.
- *
- * OPTIMIZATION: Increased blockingTimeout from 10s to 60s to reduce
- * Redis command usage by ~6x during idle periods.
- */
+// Queue-wide events (fires for all jobs, not just this worker)
 const queueEvents = new QueueEvents(CONFIG.QUEUE_NAME, {
   connection: redis,
   prefix: CONFIG.PREFIX,
-  // Increase blocking timeout to reduce command usage
-  // Default is 10000ms (10s), we increase to 60s for Upstash free tier
-  blockingTimeout: 60000,
+  blockingTimeout: 60000, // 60s to reduce Redis usage
 });
 
-// Log when jobs are waiting in queue
 queueEvents.on('waiting', ({ jobId }) => {
   console.log(`[QueueEvents] Job ${jobId} is waiting in queue`);
 });
 
-// Log when jobs complete (any worker)
 queueEvents.on('completed', ({ jobId, returnvalue }) => {
   const result = returnvalue as SendCampaignJobResult;
   console.log(
@@ -290,26 +150,15 @@ queueEvents.on('completed', ({ jobId, returnvalue }) => {
   );
 });
 
-// Log when jobs fail (any worker)
 queueEvents.on('failed', ({ jobId, failedReason }) => {
   console.error(`[QueueEvents] Job ${jobId} failed: ${failedReason}`);
 });
 
-// Log stalled jobs (taking too long)
 queueEvents.on('stalled', ({ jobId }) => {
   console.warn(`[QueueEvents] ⚠️ Job ${jobId} stalled (taking too long)`);
 });
 
-// ============================================================
-// WORKER EVENT HANDLERS
-// ============================================================
-
-/**
- * Worker lifecycle events.
- * These fire only for jobs processed by THIS worker instance.
- */
-
-// Fired when worker successfully completes a job
+// Worker events (this instance only)
 worker.on('completed', (job: Job, result: SendCampaignJobResult) => {
   console.log(
     `[Worker] Job ${job.id} completed - ` +
@@ -318,7 +167,6 @@ worker.on('completed', (job: Job, result: SendCampaignJobResult) => {
   );
 });
 
-// Fired when worker fails to process a job
 worker.on('failed', (job: Job | undefined, error: Error) => {
   if (job) {
     console.error(
@@ -330,21 +178,18 @@ worker.on('failed', (job: Job | undefined, error: Error) => {
   }
 });
 
-// Fired on worker-level errors (not job-specific)
 worker.on('error', (error: Error) => {
   console.error('[Worker] Worker error:', error.message);
 });
 
-// Fired when a job is active (being processed)
 worker.on('active', (job: Job) => {
   console.log(`[Worker] Job ${job.id} is now active`);
 });
 
-// Fired when job progress is updated (batched, so less frequent now)
 worker.on('progress', (job: Job, progress: number | object) => {
   const progressData = typeof progress === 'object' ? progress : { percentage: progress };
-  // Only log significant progress milestones to reduce console noise
   const pct = typeof progress === 'object' && 'percentage' in progress ? (progress as { percentage: number }).percentage : 0;
+  // Only log at 25% intervals
   if (pct % 25 === 0 || pct === 100) {
     console.log(
       `[Worker] Job ${job.id} progress: ${pct}%`,
@@ -353,20 +198,12 @@ worker.on('progress', (job: Job, progress: number | object) => {
   }
 });
 
-// Fired when a job is stalled
 worker.on('stalled', (jobId: string) => {
   console.warn(`[Worker] ⚠️ Job ${jobId} is stalled`);
 });
 
-// ============================================================
-// HEALTH MONITORING
-// ============================================================
-
-/**
- * Periodic health check and statistics logging.
- * Logs memory usage and worker status every 5 minutes.
- */
-const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+// Health check every 5 min
+const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000;
 
 const healthCheckTimer = setInterval(async () => {
   const memoryUsage = process.memoryUsage();
@@ -383,21 +220,6 @@ const healthCheckTimer = setInterval(async () => {
 `);
 }, HEALTH_CHECK_INTERVAL);
 
-// ============================================================
-// GRACEFUL SHUTDOWN
-// ============================================================
-
-/**
- * Graceful shutdown handler.
- *
- * When the process receives SIGTERM or SIGINT:
- * 1. Stop accepting new jobs
- * 2. Wait for current job to complete (up to 30 seconds)
- * 3. Close Redis connections
- * 4. Exit cleanly
- *
- * This prevents job corruption during deployments or restarts.
- */
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
@@ -409,29 +231,20 @@ async function gracefulShutdown(signal: string): Promise<void> {
    - Waiting for current jobs to complete (max 30s)
 `);
 
-  // Clear health check timer
   clearInterval(healthCheckTimer);
 
   try {
-    // Close HTTP keep-alive server
     console.log('[Shutdown] Closing HTTP server...');
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-    console.log('[Shutdown] HTTP server closed');
 
-    // Close the worker (waits for current jobs to complete)
     console.log('[Shutdown] Closing worker...');
     await worker.close();
-    console.log('[Shutdown] Worker closed');
 
-    // Close queue events listener
-    console.log('[Shutdown] Closing queue events listener...');
+    console.log('[Shutdown] Closing queue events...');
     await queueEvents.close();
-    console.log('[Shutdown] Queue events closed');
 
-    // Close Redis connection
-    console.log('[Shutdown] Closing Redis connection...');
+    console.log('[Shutdown] Closing Redis...');
     await closeRedisConnection();
-    console.log('[Shutdown] Redis connection closed');
 
     console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
@@ -446,36 +259,21 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }
 }
 
-// Register shutdown handlers
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Handle uncaught exceptions
 process.on('uncaughtException', (error: Error) => {
   console.error('[Worker] Uncaught exception:', error);
-  // Don't exit - let the worker continue processing
-  // The specific job will fail and be retried
 });
 
-// Handle unhandled promise rejections
 process.on('unhandledRejection', (reason: unknown) => {
   console.error('[Worker] Unhandled rejection:', reason);
-  // Don't exit - let the worker continue processing
 });
-
-// ============================================================
-// WORKER READY
-// ============================================================
 
 console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
-║  ✅ WORKER READY                                              ║
-║                                                               ║
-║  Watching for jobs on queue: ${CONFIG.QUEUE_NAME.padEnd(29)} ║
-║                                                               ║
-║  Press Ctrl+C to stop gracefully                              ║
+║  ✅ WORKER READY - queue: ${CONFIG.QUEUE_NAME.padEnd(32)} ║
 ╚═══════════════════════════════════════════════════════════════╝
 `);
 
-// Export worker for testing purposes
 export { worker, queueEvents };
