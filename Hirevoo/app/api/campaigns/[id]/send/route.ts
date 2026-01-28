@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { authOptions } from '@/lib/auth';
 import { getUTCTimeISO } from '@/lib/date-helpers';
 
@@ -139,7 +139,7 @@ async function checkAndRecoverStuckCampaign(
 /**
  * Resets a stuck campaign to 'ready' status and resets pending contacts
  */
-async function resetStuckCampaign(campaignId: string, supabase: ReturnType<typeof createClient>): Promise<void> {
+async function resetStuckCampaign(campaignId: string, supabase: SupabaseClient<any, any, any>): Promise<void> {
   console.log(`[API:send] Resetting stuck campaign ${campaignId}...`);
 
   // Reset campaign status to 'ready'
