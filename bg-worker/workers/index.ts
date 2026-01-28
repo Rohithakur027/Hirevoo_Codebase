@@ -13,7 +13,7 @@ try {
 
 import http from 'http';
 import { Worker, QueueEvents, Job } from 'bullmq';
-import { getRedis, closeRedisConnection } from '../lib/queue/config';
+import { getRedisOptions } from '../lib/queue/config';
 import { processCampaign, processCampaignInBatches } from './jobs/send-campaign';
 import type { SendCampaignJobData, SendCampaignJobResult } from '../lib/queue/email-queue';
 
@@ -41,7 +41,7 @@ httpServer.listen(PORT, () => {
   console.log(`[HTTP] Keep-alive server listening on port ${PORT}`);
 });
 
-const redis = getRedis();
+const redisOpts = getRedisOptions();
 const CONFIG = {
   QUEUE_NAME: 'emails',
   CONCURRENCY: 1,
@@ -118,7 +118,7 @@ ${logPrefix} ❌ Job failed
 
   // Optimized for Upstash free tier
   {
-    connection: redis,
+    connection: redisOpts,
     concurrency: CONFIG.CONCURRENCY,
     prefix: CONFIG.PREFIX,
     lockDuration: CONFIG.LOCK_DURATION,
@@ -133,7 +133,7 @@ ${logPrefix} ❌ Job failed
 
 // Queue-wide events (fires for all jobs, not just this worker)
 const queueEvents = new QueueEvents(CONFIG.QUEUE_NAME, {
-  connection: redis,
+  connection: redisOpts,
   prefix: CONFIG.PREFIX,
   blockingTimeout: 60000, // 60s to reduce Redis usage
 });
@@ -242,9 +242,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
     console.log('[Shutdown] Closing queue events...');
     await queueEvents.close();
-
-    console.log('[Shutdown] Closing Redis...');
-    await closeRedisConnection();
 
     console.log(`
 ╔═══════════════════════════════════════════════════════════════╗

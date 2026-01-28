@@ -257,11 +257,29 @@ let redisInstance: Redis | null = null;
 
 export function getRedis(): Redis {
   if (!redisInstance) {
-    // Validate environment variables here, when Redis is actually needed
     validateRedisUrl();
     redisInstance = createRedisConnection('bullmq-main');
   }
   return redisInstance;
+}
+
+/**
+ * Returns Redis connection options for BullMQ (avoids ioredis version conflicts)
+ */
+export function getRedisOptions() {
+  const redisUrl = validateRedisUrl();
+  const url = new URL(redisUrl);
+
+  return {
+    host: url.hostname,
+    port: parseInt(url.port) || 6379,
+    password: url.password || undefined,
+    username: url.username || undefined,
+    tls: redisUrl.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    family: 0,
+  };
 }
 
 // For backward compatibility, export a function that returns the Redis instance
