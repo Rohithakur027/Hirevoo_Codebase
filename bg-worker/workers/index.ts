@@ -14,7 +14,7 @@ try {
 import http from 'http';
 import { Worker, QueueEvents, Job } from 'bullmq';
 import { getRedisOptions } from '../lib/queue/config';
-import { processCampaign, processCampaignInBatches } from './jobs/send-campaign';
+import { processCampaign } from './jobs/send-campaign';
 import type { SendCampaignJobData, SendCampaignJobResult } from '../lib/queue/email-queue';
 
 // Keep-alive HTTP server for Render free tier + health checks
@@ -35,10 +35,6 @@ const httpServer = http.createServer((req, res) => {
 
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Hirevoo Background Worker is running.');
-});
-
-httpServer.listen(PORT, () => {
-  console.log(`[HTTP] Keep-alive server listening on port ${PORT}`);
 });
 
 const redisOpts = getRedisOptions();
@@ -264,21 +260,60 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }
 }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// =======================================================
+// EXPORT & STARTUP LOGIC
+// =======================================================
 
-process.on('uncaughtException', (error: Error) => {
-  console.error('[Worker] Uncaught exception:', error);
-});
+// Singleton tracker to prevent multiple startup in dev
+let isWorkerStarted = false;
 
-process.on('unhandledRejection', (reason: unknown) => {
-  console.error('[Worker] Unhandled rejection:', reason);
-});
+export async function startWorker() {
+  if (isWorkerStarted) {
+    console.log('[Worker] Worker already started, skipping initialization.');
+    return;
+  }
 
-console.log(`
+  isWorkerStarted = true;
+  console.log('[Worker] Initializing worker in integrated mode...');
+
+  // Resume the worker if it was created but not running
+  if (!worker.isRunning()) {
+    await worker.resume();
+  } else {
+    // It might be running but let's make sure it's not paused
+    // In BullMQ, new Worker() usually starts automatically.
+  }
+
+  console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
-║  ✅ WORKER READY - queue: ${CONFIG.QUEUE_NAME.padEnd(32)} ║
+║  🚀 HIREVOO EMAIL WORKER STARTED                              ║
+║  Mode: Integrated (Next.js)                                   ║
 ╚═══════════════════════════════════════════════════════════════╝
 `);
+}
+
+// Only setup Standalone Mode listeners if we are running this file directly
+if (require.main === module) {
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  process.on('uncaughtException', (error: Error) => {
+    console.error('[Worker] Uncaught exception:', error);
+  });
+
+  process.on('unhandledRejection', (reason: unknown) => {
+    console.error('[Worker] Unhandled rejection:', reason);
+  });
+
+  httpServer.listen(PORT, () => {
+    console.log(`[HTTP] Keep-alive server listening on port ${PORT}`);
+  });
+
+  console.log(`
+╔═══════════════════════════════════════════════════════════════╗
+║   🚀 HIREVOO EMAIL WORKER (STANDALONE)                        ║
+╚═══════════════════════════════════════════════════════════════╝
+`);
+}
 
 export { worker, queueEvents };

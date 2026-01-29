@@ -4,10 +4,10 @@
   "description": "Production-grade background worker system for Hirevoo email campaigns",
   "private": true,
   "scripts": {
-    
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "concurrently --kill-others --restart-tries 3 --restart-after 5000 \"npm run start:web\" \"npm run worker:prod\"",
+    "start:web": "next start",
     "lint": "next lint",
     "worker": "tsx watch workers/index.ts",
     "worker:prod": "tsx workers/index.ts",
@@ -21,7 +21,9 @@
     "next": "^14.0.4",
     "next-auth": "^4.24.5",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "tsx": "^4.7.0",
+    "concurrently": "^8.2.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -29,7 +31,6 @@
     "@types/react-dom": "^18.2.0",
     "eslint": "^8.55.0",
     "eslint-config-next": "^14.0.4",
-    "tsx": "^4.7.0",
     "typescript": "^5.3.0"
   },
   "engines": {
