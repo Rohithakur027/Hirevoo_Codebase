@@ -129,8 +129,8 @@ function validateRedisUrl(): string {
   if (!redisUrl) {
     throw new Error(
       '[Redis] REDIS_URL environment variable is not set. ' +
-        'Please add REDIS_URL to your .env.local file. ' +
-        'Expected format: redis://username:password@host:port or rediss://... for TLS'
+      'Please add REDIS_URL to your .env.local file. ' +
+      'Expected format: redis://username:password@host:port or rediss://... for TLS'
     );
   }
 
@@ -138,7 +138,7 @@ function validateRedisUrl(): string {
   if (!redisUrl.startsWith('redis://') && !redisUrl.startsWith('rediss://')) {
     throw new Error(
       '[Redis] REDIS_URL must start with redis:// or rediss:// (for TLS). ' +
-        `Received: ${redisUrl.substring(0, 20)}...`
+      `Received: ${redisUrl.substring(0, 20)}...`
     );
   }
 
@@ -184,7 +184,7 @@ export function createRedisConnection(connectionName?: string): Redis {
     // Note: This doesn't mean the connection is ready for commands yet
     console.log(
       `[Redis:${connectionName || 'default'}] ` +
-        `Connection established to Redis server`
+      `Connection established to Redis server`
     );
   });
 
@@ -193,7 +193,7 @@ export function createRedisConnection(connectionName?: string): Redis {
     // This is the event that indicates full operational status
     console.log(
       `[Redis:${connectionName || 'default'}] ` +
-        `✅ Connection ready. Redis is accepting commands.`
+      `✅ Connection ready. Redis is accepting commands.`
     );
   });
 
@@ -202,7 +202,7 @@ export function createRedisConnection(connectionName?: string): Redis {
     // ioredis will automatically attempt to reconnect based on retryStrategy
     console.error(
       `[Redis:${connectionName || 'default'}] ` +
-        `❌ Connection error: ${error.message}`
+      `❌ Connection error: ${error.message}`
     );
 
     // In production, you might want to send this to an error tracking service
@@ -214,7 +214,7 @@ export function createRedisConnection(connectionName?: string): Redis {
     // This could be intentional (calling quit()) or due to an error
     console.warn(
       `[Redis:${connectionName || 'default'}] ` +
-        `Connection closed`
+      `Connection closed`
     );
   });
 
@@ -222,7 +222,7 @@ export function createRedisConnection(connectionName?: string): Redis {
     // Fired when ioredis is attempting to reconnect
     console.log(
       `[Redis:${connectionName || 'default'}] ` +
-        `Reconnecting in ${delayMs}ms...`
+      `Reconnecting in ${delayMs}ms...`
     );
   });
 
@@ -231,7 +231,7 @@ export function createRedisConnection(connectionName?: string): Redis {
     // This happens after retryStrategy returns null
     console.error(
       `[Redis:${connectionName || 'default'}] ` +
-        `Connection ended. No more reconnection attempts.`
+      `Connection ended. No more reconnection attempts.`
     );
   });
 
@@ -275,6 +275,7 @@ export function getRedisOptions() {
     port: parseInt(url.port) || 6379,
     password: url.password || undefined,
     username: url.username || undefined,
+    db: url.pathname ? parseInt(url.pathname.split('/')[1]) || 0 : 0,
     tls: redisUrl.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
