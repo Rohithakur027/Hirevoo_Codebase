@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"D:\\\\001GOAT\\\\projects\\\\01-email\\\\bg-worker\\\\lib\\\\queue\"\" 2>/dev/null || dir /b \"D:001GOATprojects01-emailbg-workerlibqueue \")",
+      "Bash(ls -la \"D:\\\\001GOAT\\\\projects\\\\01-email\\\\bg-worker\\\\lib\\\\services\"\" 2>/dev/null || dir /b \"D:001GOATprojects01-emailbg-workerlibservices \")"
+    ]
+  }
+}
