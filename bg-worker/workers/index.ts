@@ -7,35 +7,14 @@ try {
 }
 
 /**
- * Background worker entry point - processes email jobs from BullMQ.
- * Runs as separate process with HTTP keep-alive for Render free tier.
+ * Background worker - processes email jobs from BullMQ.
+ * Runs integrated with Next.js (same process, no separate port needed).
  */
 
-import http from 'http';
 import { Worker, QueueEvents, Job } from 'bullmq';
 import { getRedisOptions } from '../lib/queue/config';
 import { processCampaign } from './jobs/send-campaign';
 import type { SendCampaignJobData, SendCampaignJobResult } from '../lib/queue/email-queue';
-
-// Keep-alive HTTP server for Render free tier + health checks
-
-const PORT = process.env.PORT || 10000;
-
-const httpServer = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      service: 'bg-worker',
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-    }));
-    return;
-  }
-
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Hirevoo Background Worker is running.');
-});
 
 const redisOpts = getRedisOptions();
 const CONFIG = {
@@ -225,38 +204,19 @@ const healthCheckTimer = setInterval(async () => {
 }, HEALTH_CHECK_INTERVAL);
 
 async function gracefulShutdown(signal: string): Promise<void> {
-  console.log(`
-╔═══════════════════════════════════════════════════════════════╗
-║  🛑 SHUTDOWN SIGNAL RECEIVED: ${signal.padEnd(30)}        ║
-╚═══════════════════════════════════════════════════════════════╝
-
-⏳ Initiating graceful shutdown...
-   - Stopping acceptance of new jobs
-   - Waiting for current jobs to complete (max 30s)
-`);
-
+  console.log(`[Worker] Shutdown signal received: ${signal}`);
   clearInterval(healthCheckTimer);
 
   try {
-    console.log('[Shutdown] Closing HTTP server...');
-    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-
-    console.log('[Shutdown] Closing worker...');
+    console.log('[Worker] Closing worker...');
     await worker.close();
 
-    console.log('[Shutdown] Closing queue events...');
+    console.log('[Worker] Closing queue events...');
     await queueEvents.close();
 
-    console.log(`
-╔═══════════════════════════════════════════════════════════════╗
-║  ✅ GRACEFUL SHUTDOWN COMPLETE                                ║
-╚═══════════════════════════════════════════════════════════════╝
-`);
-
-    process.exit(0);
+    console.log('[Worker] Graceful shutdown complete');
   } catch (error) {
-    console.error('[Shutdown] Error during shutdown:', error);
-    process.exit(1);
+    console.error('[Worker] Error during shutdown:', error);
   }
 }
 
@@ -292,28 +252,8 @@ export async function startWorker() {
 `);
 }
 
-// Only setup Standalone Mode listeners if we are running this file directly
-if (require.main === module) {
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-  process.on('uncaughtException', (error: Error) => {
-    console.error('[Worker] Uncaught exception:', error);
-  });
-
-  process.on('unhandledRejection', (reason: unknown) => {
-    console.error('[Worker] Unhandled rejection:', reason);
-  });
-
-  httpServer.listen(PORT, () => {
-    console.log(`[HTTP] Keep-alive server listening on port ${PORT}`);
-  });
-
-  console.log(`
-╔═══════════════════════════════════════════════════════════════╗
-║   🚀 HIREVOO EMAIL WORKER (STANDALONE)                        ║
-╚═══════════════════════════════════════════════════════════════╝
-`);
-}
+// Register shutdown handlers
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export { worker, queueEvents };
