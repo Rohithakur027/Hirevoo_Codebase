@@ -59,8 +59,9 @@ export async function processReply(
             throw new Error(`Failed to fetch contact data: ${fetchError?.message || 'Contact not found'}`);
         }
 
-        const recipientEmail = contactData.contacts.email;
-        const recipientName = contactData.contacts.name;
+        const contact = Array.isArray(contactData.contacts) ? contactData.contacts[0] : contactData.contacts;
+        const recipientEmail = contact.email;
+        const recipientName = contact.name;
         const originalSubject = contactData.email_subject || 'No Subject';
         const replySubject = originalSubject.startsWith('Re:')
             ? originalSubject
