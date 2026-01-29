@@ -1,12 +1,7 @@
 /** @type {import('next').NextConfig} */
 module.exports = {
-  // Transpile BullMQ and ioredis for proper webpack bundling
-  transpilePackages: ['bullmq', 'ioredis'],
-
-  // Mark Node.js-only packages as external for API routes
-  experimental: {
-    serverComponentsExternalPackages: ['bullmq', 'ioredis'],
-  },
+  // Mark Node.js-only packages as external for server-side code
+  serverExternalPackages: ['bullmq', 'ioredis'],
 
   async headers() {
     const allowedOrigin = process.env.ALLOWED_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
