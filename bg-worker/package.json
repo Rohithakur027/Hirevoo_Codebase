@@ -23,15 +23,15 @@
     "next-auth": "^4.24.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "tsx": "^4.7.0"
+    "tsx": "^4.7.0",
+    "typescript": "^5.9.3",
+    "@types/react": "^18.3.27"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "@types/react": "^18.3.27",
     "@types/react-dom": "^18.2.0",
     "eslint": "^8.55.0",
-    "eslint-config-next": "^14.0.4",
-    "typescript": "^5.9.3"
+    "eslint-config-next": "^14.0.4"
   },
   "engines": {
     "node": ">=18.0.0"
