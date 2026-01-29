@@ -289,12 +289,12 @@ export function getRedisConnection(): Redis {
   return getRedis();
 }
 
-// Keep the old export name for backward compatibility, but make it a getter
-Object.defineProperty(module.exports, 'redis', {
-  get: getRedis,
-  enumerable: true,
-  configurable: false
-});
+// Legacy export alias (use getRedis() instead)
+export const redis = {
+  get instance() {
+    return getRedis();
+  }
+};
 
 /**
  * Gracefully closes the Redis connection.
