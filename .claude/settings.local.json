@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix Next.js build: remove CommonJS exports, add webpack config\n\n- Remove Object.defineProperty CommonJS hack in config.ts\n- Add transpilePackages for bullmq/ioredis\n- Add serverComponentsExternalPackages for Node.js modules\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git push:*)"
-    ]
-  }
-}
