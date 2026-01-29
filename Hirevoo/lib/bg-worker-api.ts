@@ -118,6 +118,42 @@ export class BgWorkerApi {
     return data as CampaignJobStatus;
   }
 
+  /**
+   * Queue a reply to be sent via background worker.
+   *
+   * @param campaignContactId - The ID of the contact to reply to
+   * @param message - The reply message content
+   * @param userId - The ID of the sending user
+   * @returns Promise with job details or error
+   */
+  async sendReply(campaignContactId: string, message: string, userId: string): Promise<any> {
+    const response = await fetch(`${this.bgWorkerUrl}/api/emails/reply`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.BG_WORKER_API_KEY || 'internal-key'}`,
+      },
+      body: JSON.stringify({
+        campaignContactId,
+        message,
+        userId,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new BgWorkerError(
+        data.error || 'Failed to send reply',
+        data.code || 'UNKNOWN_ERROR',
+        response.status,
+        data.details
+      );
+    }
+
+    return data;
+  }
+
 }
 
 // ============================================================

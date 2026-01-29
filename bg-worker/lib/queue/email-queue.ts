@@ -38,6 +38,16 @@ export interface SendCampaignJobData {
 }
 
 /**
+ * Data structure for email reply jobs.
+ */
+export interface SendReplyJobData {
+  campaignContactId: string;
+  message: string;
+  userId: string;
+  queuedAt: string;
+}
+
+/**
  * Result returned by the worker when a job completes.
  * This is stored in Redis and can be retrieved later.
  */
@@ -272,6 +282,54 @@ export async function queueCampaignSend(
   return {
     jobId: job.id!,
     queuePosition: waitingCount + 1,
+  };
+}
+
+/**
+ * Queues a reply to be sent.
+ *
+ * @param campaignContactId - ID of the campaign_contact record
+ * @param message - The reply body
+ * @param userId - ID of the user sending the reply
+ */
+export async function queueReplySend(
+  campaignContactId: string,
+  message: string,
+  userId: string
+): Promise<{ jobId: string; queuePosition: number }> {
+  const timestamp = new Date().toISOString();
+
+  // Create a unique job ID for this specific reply attempt
+  // to avoid duplicates if user clicks multiple times quickly
+  const jobId = `reply-${campaignContactId}-${Date.now()}`;
+
+  const jobData: SendReplyJobData = {
+    campaignContactId,
+    message,
+    userId,
+    queuedAt: timestamp
+  };
+
+  const job = await getEmailQueue().add(
+    'send-reply',
+    jobData as any, // Cast to any because the queue relies on the main job type generics
+    {
+      jobId,
+      priority: 1, // High priority for replies
+      removeOnComplete: true,
+      removeOnFail: {
+        age: 24 * 3600 // Keep failed replies for 24h
+      }
+    }
+  );
+
+  const waitingCount = await getEmailQueue().getWaitingCount();
+
+  console.log(`[Queue] Queued reply for contact ${campaignContactId}`);
+
+  return {
+    jobId: job.id!,
+    queuePosition: waitingCount + 1
   };
 }
 

@@ -87,7 +87,13 @@ ${logPrefix} 📥 Job received
 `);
 
     try {
-      const result = await processCampaign(job);
+      let result;
+      if (job.name === 'send-reply') {
+        const { processReply } = await import('./jobs/send-reply');
+        result = await processReply(job as any);
+      } else {
+        result = await processCampaign(job);
+      }
 
       const duration = Date.now() - startTime;
 
@@ -148,7 +154,7 @@ queueEvents.on('completed', ({ jobId, returnvalue }) => {
     : returnvalue as SendCampaignJobResult;
   console.log(
     `[QueueEvents] Job ${jobId} completed - ` +
-      `Sent: ${result?.successCount || 0}, Failed: ${result?.failureCount || 0}`
+    `Sent: ${result?.successCount || 0}, Failed: ${result?.failureCount || 0}`
   );
 });
 
@@ -164,8 +170,8 @@ queueEvents.on('stalled', ({ jobId }) => {
 worker.on('completed', (job: Job, result: SendCampaignJobResult) => {
   console.log(
     `[Worker] Job ${job.id} completed - ` +
-      `${result.successCount} sent, ${result.failureCount} failed ` +
-      `in ${(result.durationMs / 1000).toFixed(1)}s`
+    `${result.successCount} sent, ${result.failureCount} failed ` +
+    `in ${(result.durationMs / 1000).toFixed(1)}s`
   );
 });
 

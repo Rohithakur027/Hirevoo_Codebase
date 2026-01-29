@@ -114,7 +114,7 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
     }, [newMessage])
 
     const handleSendMessage = async () => {
-        if (!newMessage.trim()) return
+        if (!newMessage.trim() || !recipient) return
 
         const tempId = `temp-${Date.now()}`
         const tempMessage: Message = {
@@ -129,21 +129,54 @@ export function EmailChatDialog({ recipient, open, onOpenChange }: EmailChatDial
         setMessages(prev => [...prev, tempMessage])
         setNewMessage("")
 
-        // Reset height happens via useEffect on newMessage change
-
         // Scroll to bottom
         setTimeout(() => {
             scrollEndRef.current?.scrollIntoView({ behavior: "smooth" })
         }, 100)
 
-        // Simulate API call delay
+        // Adjust height immediately since we cleared the input
         setTimeout(() => {
+            adjustHeight()
+        }, 0)
+
+        try {
+            // Call our new API route
+            const res = await fetch('/api/emails/reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    campaignContactId: recipient.campaignContactId || recipient.id,
+                    message: tempMessage.content
+                })
+            })
+
+            const data = await res.json()
+
+            if (!res.ok || !data.success) {
+                // Handle error - set status to failed
+                setMessages(prev => prev.map(msg =>
+                    msg.id === tempId
+                        ? { ...msg, status: "failed" }
+                        : msg
+                ))
+                console.error("Failed to send reply:", data.error)
+            } else {
+                // Success - set status to sent
+                setMessages(prev => prev.map(msg =>
+                    msg.id === tempId
+                        ? { ...msg, status: "sent" }
+                        : msg
+                ))
+            }
+
+        } catch (error) {
+            console.error("Error sending reply:", error)
             setMessages(prev => prev.map(msg =>
                 msg.id === tempId
-                    ? { ...msg, status: "sent" } // Update to sent (1 tick)
+                    ? { ...msg, status: "failed" }
                     : msg
             ))
-        }, 1000)
+        }
     }
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
