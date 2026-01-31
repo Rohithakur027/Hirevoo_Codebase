@@ -59,7 +59,7 @@ const SignupModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void
           <button onClick={onClose} className="absolute top-4 right-4 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
             <X className="h-5 w-5 text-gray-500" />
           </button>
-          
+
           <div className="text-center mb-8">
             <div className="w-12 h-12 bg-gray-900 dark:bg-white rounded-2xl flex items-center justify-center mx-auto mb-4">
               <HirevooMark className="h-6 w-6 text-white dark:text-gray-900" />
@@ -112,12 +112,12 @@ const SignupModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void
 );
 
 // Smooth scroll section component
-const ScrollSection = ({ 
-  children, 
+const ScrollSection = ({
+  children,
   className = '',
-  delay = 0 
-}: { 
-  children: React.ReactNode; 
+  delay = 0
+}: {
+  children: React.ReactNode;
   className?: string;
   delay?: number;
 }) => {
@@ -126,7 +126,7 @@ const ScrollSection = ({
     target: ref,
     offset: ["start end", "end start"]
   });
-  
+
   const opacity = useTransform(scrollYProgress, [0, 0.2, 0.8, 1], [0, 1, 1, 0]);
   const y = useTransform(scrollYProgress, [0, 0.2, 0.8, 1], [60, 0, 0, -60]);
   const smoothY = useSpring(y, { stiffness: 100, damping: 30 });
@@ -144,12 +144,12 @@ const ScrollSection = ({
 };
 
 // Parallax element
-const ParallaxElement = ({ 
-  children, 
+const ParallaxElement = ({
+  children,
   speed = 0.5,
-  className = '' 
-}: { 
-  children?: React.ReactNode; 
+  className = ''
+}: {
+  children?: React.ReactNode;
   speed?: number;
   className?: string;
 }) => {
@@ -158,7 +158,7 @@ const ParallaxElement = ({
     target: ref,
     offset: ["start end", "end start"]
   });
-  
+
   const y = useTransform(scrollYProgress, [0, 1], [100 * speed, -100 * speed]);
   const smoothY = useSpring(y, { stiffness: 100, damping: 30 });
 
@@ -173,7 +173,7 @@ export default function LandingPage() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [showSignup, setShowSignup] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
-  
+
   const containerRef = useRef(null);
   const { scrollYProgress } = useScroll();
   const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30 });
@@ -184,7 +184,7 @@ export default function LandingPage() {
     const initialTheme = stored ? (stored as 'light' | 'dark') : prefersDark ? 'dark' : 'light';
     setTheme(initialTheme);
     document.documentElement.classList.toggle('dark', initialTheme === 'dark');
-    
+
     // Trigger animations after mount
     setTimeout(() => setIsLoaded(true), 100);
   }, []);
@@ -259,7 +259,7 @@ export default function LandingPage() {
         {/* Subtle gradient orbs with parallax */}
         <ParallaxElement speed={0.3} className="absolute top-20 left-1/4 w-96 h-96 bg-blue-100 dark:bg-blue-900/20 rounded-full blur-3xl opacity-50" />
         <ParallaxElement speed={0.5} className="absolute top-40 right-1/4 w-80 h-80 bg-purple-100 dark:bg-purple-900/20 rounded-full blur-3xl opacity-40" />
-        
+
         {/* Curved Pill Shapes on Sides (Large screens only) */}
         <div className="hidden lg:block absolute -left-20 xl:-left-10 top-24 bottom-24 w-48 xl:w-64 pointer-events-none">
           <div
@@ -291,14 +291,14 @@ export default function LandingPage() {
               <br />
               <span className="text-gray-400 dark:text-gray-500">Get Hired.</span>
             </motion.h1>
-            
+
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={isLoaded ? { opacity: 1, y: 0 } : {}}
               transition={{ duration: 0.8, delay: 0.5 }}
               className="text-lg text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-10"
             >
-              Skip the job boards. Email hiring managers directly with AI-personalized 
+              Skip the job boards. Email hiring managers directly with AI-personalized
               outreach. 23% response rate vs 2% on traditional applications.
             </motion.p>
 
@@ -330,7 +330,7 @@ export default function LandingPage() {
               className="bg-gray-200/90 dark:bg-gray-800 rounded-3xl p-5 shadow-xl shadow-gray-400/40 dark:shadow-black/40"
             >
               <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-4">Bring your contacts</p>
-              
+
               {/* Contact List */}
               <div className="space-y-3">
                 {[
@@ -358,7 +358,7 @@ export default function LandingPage() {
                   </motion.div>
                 ))}
               </div>
-              
+
               <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800">
                 <p className="text-xs text-gray-400">Upload a CSV or paste emails to get started.</p>
               </div>
@@ -379,7 +379,7 @@ export default function LandingPage() {
                 </div>
                 <span className="text-xs text-gray-400 dark:text-gray-500">AI is writing...</span>
               </div>
-              
+
               {/* Email Content */}
               <div className="bg-gray-800 dark:bg-gray-100 rounded-xl p-4 mb-4">
                 <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">To: sarah@vercel.com</p>
@@ -391,7 +391,7 @@ export default function LandingPage() {
                   <p className="text-sm text-white dark:text-gray-900 leading-relaxed">
                     Hi Sarah,
                     <br /><br />
-                    <span className="text-emerald-400 dark:text-emerald-600">Loved your talk at Next.js Conf</span> — the edge rendering 
+                    <span className="text-emerald-400 dark:text-emerald-600">Loved your talk at Next.js Conf</span> — the edge rendering
                     insights were fascinating.
                     <motion.span
                       animate={{ opacity: [1, 0] }}
@@ -419,7 +419,7 @@ export default function LandingPage() {
               className="bg-gray-200/90 dark:bg-gray-800 rounded-3xl p-5 shadow-xl shadow-gray-400/40 dark:shadow-black/40"
             >
               <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-4">Your pipeline</p>
-              
+
               {/* Mini Kanban */}
               <div className="flex gap-2 mb-4">
                 {[
@@ -439,7 +439,7 @@ export default function LandingPage() {
                   </motion.div>
                 ))}
               </div>
-              
+
               {/* Recent Activity */}
               <div className="space-y-2">
                 <motion.div
@@ -503,14 +503,14 @@ export default function LandingPage() {
                       1
                     </span>
                   </div>
-                  
+
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-3 text-center">
                     Add your contacts
                   </h3>
                   <p className="text-gray-500 dark:text-gray-400 text-center text-sm mb-6">
                     Upload a CSV file or paste emails from your contact list
                   </p>
-                  
+
                   {/* Visual - File Upload */}
                   <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 border-2 border-dashed border-gray-200 dark:border-gray-700">
                     <div className="flex flex-col items-center">
@@ -542,14 +542,14 @@ export default function LandingPage() {
                       2
                     </span>
                   </div>
-                  
+
                   <h3 className="text-xl font-semibold text-white dark:text-gray-900 mb-3 text-center">
                     AI crafts your emails
                   </h3>
                   <p className="text-gray-400 dark:text-gray-500 text-center text-sm mb-6">
                     Watch the magic happen in seconds
                   </p>
-                  
+
                   {/* Visual - AI Writing */}
                   <div className="bg-gray-800 dark:bg-gray-100 rounded-2xl p-4">
                     <div className="space-y-2">
@@ -599,14 +599,14 @@ export default function LandingPage() {
                       3
                     </span>
                   </div>
-                  
+
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-3 text-center">
                     Send & get responses
                   </h3>
                   <p className="text-gray-500 dark:text-gray-400 text-center text-sm mb-6">
                     One click to send, then watch replies come in
                   </p>
-                  
+
                   {/* Visual - Send Button & Stats */}
                   <div className="bg-white dark:bg-gray-800 rounded-2xl p-4">
                     <motion.button
@@ -673,7 +673,7 @@ export default function LandingPage() {
                       {/* Background shapes */}
                       <div className="absolute -top-4 -left-4 w-32 h-32 bg-purple-200 dark:bg-purple-900/30 rounded-full blur-2xl opacity-60" />
                       <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-blue-200 dark:bg-blue-900/30 rounded-full blur-2xl opacity-60" />
-                      
+
                       {/* Main card */}
                       <motion.div
                         animate={{ y: [0, -8, 0] }}
@@ -867,8 +867,8 @@ export default function LandingPage() {
                   <p className="text-gray-500 dark:text-gray-400 text-sm">Perfect for getting started</p>
                 </div>
                 <div className="mb-6">
-                  <span className="text-4xl font-bold text-gray-900 dark:text-white">$0</span>
-                  <span className="text-gray-500 dark:text-gray-400">/month</span>
+                  <span className="text-4xl font-bold text-gray-900 dark:text-white">free</span>
+                  \
                 </div>
                 <ul className="space-y-3 mb-8 flex-1">
                   {['10 emails per day', 'Basic AI personalization', 'Email tracking', 'Community support'].map((feature) => (
@@ -986,7 +986,7 @@ export default function LandingPage() {
                 >
                   {/* Quote Icon */}
                   <div className="text-5xl font-serif text-gray-900 dark:text-white leading-none mb-4">"</div>
-                  
+
                   {/* Quote Text */}
                   <p className="text-gray-700 dark:text-gray-300 text-lg leading-relaxed flex-1 mb-8">
                     I'd spend hours applying through job boards with zero responses. Now, I can directly reach hiring managers with{' '}
@@ -1015,7 +1015,7 @@ export default function LandingPage() {
                 >
                   {/* Quote Icon */}
                   <div className="text-5xl font-serif text-gray-900 dark:text-white leading-none mb-4">"</div>
-                  
+
                   {/* Quote Text */}
                   <p className="text-gray-700 dark:text-gray-300 text-lg leading-relaxed flex-1 mb-8">
                     As a remote job seeker, reaching companies across time zones was a nightmare.{' '}
@@ -1046,7 +1046,7 @@ export default function LandingPage() {
                   <div className="w-16 h-16 bg-gray-800 dark:bg-gray-100 rounded-2xl flex items-center justify-center mb-6">
                     <HirevooMark className="h-8 w-8 text-white dark:text-gray-900" />
                   </div>
-                  
+
                   {/* Stats */}
                   <div className="mb-6">
                     <div className="text-5xl font-bold text-white dark:text-gray-900 mb-2">23%</div>
