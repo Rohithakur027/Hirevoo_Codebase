@@ -20,7 +20,8 @@ import {
     ChevronRight,
     ChevronLeft,
     FileText,
-    Save
+    Save,
+    Copy
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -170,23 +171,49 @@ export function EmailEditor({
         <TooltipProvider>
             <div className="flex-1 flex flex-col bg-white min-w-0 h-full overflow-y-auto">
                 {/* Top Controls: Templates & Save */}
-                <div className="px-4 md:px-6 py-3 border-b flex items-center justify-end gap-2 bg-gray-50/50">
-                    <Button
-                        size="sm"
-                        onClick={onOpenTemplates}
-                        className="gap-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50 shadow-sm whitespace-nowrap cursor-pointer rounded-[6px] transition-all"
-                    >
-                        <FileText className="w-4 h-4 text-gray-500" />
-                        <span className="hidden sm:inline font-medium">Browse Templates</span>
-                    </Button>
-                    <Button
-                        size="sm"
-                        onClick={onOpenSaveTemplate}
-                        className="gap-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50 shadow-sm whitespace-nowrap cursor-pointer rounded-[6px] transition-all"
-                    >
-                        <Save className="w-4 h-4 text-gray-500" />
-                        <span className="hidden sm:inline font-medium">Save Template</span>
-                    </Button>
+                <div className="px-4 md:px-6 py-3 border-b flex items-center justify-between gap-2 bg-gray-50/50">
+                    {/* Use Template for All Toggle */}
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <div className="flex items-center gap-2">
+                                <Switch
+                                    id="use-template-for-all"
+                                    checked={useTemplateForAll}
+                                    onCheckedChange={setUseTemplateForAll}
+                                    className="data-[state=checked]:bg-black"
+                                />
+                                <label
+                                    htmlFor="use-template-for-all"
+                                    className="flex items-center gap-1.5 text-sm font-medium text-gray-700 cursor-pointer select-none"
+                                >
+                                    <Copy className="w-4 h-4 text-gray-500" />
+                                    <span className="hidden sm:inline">Apply to All</span>
+                                </label>
+                            </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-[200px]">
+                            <p>When enabled, this email content will be copied to all other contacts</p>
+                        </TooltipContent>
+                    </Tooltip>
+
+                    <div className="flex items-center gap-2">
+                        <Button
+                            size="sm"
+                            onClick={onOpenTemplates}
+                            className="gap-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50 shadow-sm whitespace-nowrap cursor-pointer rounded-[6px] transition-all"
+                        >
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            <span className="hidden sm:inline font-medium">Browse Templates</span>
+                        </Button>
+                        <Button
+                            size="sm"
+                            onClick={onOpenSaveTemplate}
+                            className="gap-2 bg-white border border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50 shadow-sm whitespace-nowrap cursor-pointer rounded-[6px] transition-all"
+                        >
+                            <Save className="w-4 h-4 text-gray-500" />
+                            <span className="hidden sm:inline font-medium">Save Template</span>
+                        </Button>
+                    </div>
                 </div>
 
                 {/* Header Section: To, Cc, Bcc */}

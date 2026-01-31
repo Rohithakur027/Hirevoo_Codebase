@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { fetchContactsFromSheet, isValidSheetsUrl } from "@/lib/google-sheets"
 
 export interface Recipient {
   id: string
@@ -141,16 +142,38 @@ export default function UploadContacts() {
       return
     }
 
-    // Basic URL validation
-    if (!googleSheetUrl.includes('docs.google.com/spreadsheets')) {
+    // Validate URL format
+    if (!isValidSheetsUrl(googleSheetUrl)) {
       setImportHint('Please enter a valid Google Sheets URL')
       return
     }
 
     // Clear any previous hints
     setImportHint('')
+    setIsUploading(true)
 
-    alert('Google Sheets import: Make sure the sheet is publicly accessible. This requires Google Sheets API setup.')
+    try {
+      const contacts = await fetchContactsFromSheet(googleSheetUrl)
+
+      const parsedContacts: Recipient[] = contacts.map(contact => ({
+        id: crypto.randomUUID(),
+        email: contact.email,
+        name: contact.name || contact.email.split('@')[0],
+        company: contact.company,
+        role: contact.role,
+        isValid: isValidEmail(contact.email),
+      }))
+
+      setRecipients(prev => [...prev, ...parsedContacts])
+      setGoogleSheetUrl('')
+      alert(`Successfully imported ${parsedContacts.length} contacts from Google Sheet`)
+    } catch (error) {
+      console.error('Failed to import from Google Sheet:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to import contacts'
+      setImportHint(errorMessage)
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   const handleDelete = (id: string) => {
@@ -293,9 +316,10 @@ export default function UploadContacts() {
               <div className="flex justify-end pt-1">
                 <Button
                   onClick={handleImportSheet}
-                  className="bg-black text-white hover:bg-gray-800 h-8 text-xs px-4 font-medium rounded-[6px]"
+                  disabled={isUploading}
+                  className="bg-black text-white hover:bg-gray-800 h-8 text-xs px-4 font-medium rounded-[6px] disabled:bg-gray-600 disabled:cursor-not-allowed"
                 >
-                  Import Sheet
+                  {isUploading ? 'Importing...' : 'Import Sheet'}
                 </Button>
               </div>
             </CardContent>

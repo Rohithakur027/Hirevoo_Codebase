@@ -113,6 +113,26 @@ export function ComposeReviewPage() {
         [setCurrentContactId, campaign, updateContactEmail, subject, emailBody],
     )
 
+    // Handle the "Apply to All" toggle change - MUST be before conditional returns
+    const handleUseTemplateForAllChange = useCallback((enabled: boolean) => {
+        setUseTemplateForAll(enabled)
+
+        if (enabled && campaign?.contacts) {
+            // Apply current email content to all contacts immediately
+            campaign.contacts.forEach((contact) => {
+                updateContactEmail(contact.id, subject, emailBody)
+            })
+
+            toast.success("Applied to all contacts!", {
+                description: `Email content has been copied to all ${campaign.contacts.length} contacts. Future edits will also sync.`,
+            })
+        } else if (!enabled) {
+            toast.info("Apply to All disabled", {
+                description: "Edits will now only affect the current contact.",
+            })
+        }
+    }, [campaign, subject, emailBody, updateContactEmail])
+
     // Show loading while waiting for campaign
     if (isLoading || !campaign || !campaign.contacts || campaign.contacts.length === 0) {
         return (
@@ -161,10 +181,30 @@ export function ComposeReviewPage() {
     const handleSelectTemplate = (template: { subject: string; body: string }) => {
         setSubject(template.subject)
         setEmailBody(template.body)
+
+        // If "Apply to All" is enabled, apply the template to all contacts
+        if (useTemplateForAll && campaign?.contacts) {
+            campaign.contacts.forEach((contact) => {
+                updateContactEmail(contact.id, template.subject, template.body)
+            })
+            toast.success("Template applied to all contacts!", {
+                description: `Template has been copied to all ${campaign.contacts.length} contacts.`,
+            })
+        }
     }
 
     const handleAIInsert = (text: string) => {
         setEmailBody(text)
+
+        // If "Apply to All" is enabled, apply to all contacts
+        if (useTemplateForAll && campaign?.contacts) {
+            campaign.contacts.forEach((contact) => {
+                updateContactEmail(contact.id, subject, text)
+            })
+            toast.success("AI content applied to all contacts!", {
+                description: `Content has been copied to all ${campaign.contacts.length} contacts.`,
+            })
+        }
     }
 
     const handlePrevious = () => {
@@ -279,7 +319,7 @@ export function ComposeReviewPage() {
                     emailBody={emailBody}
                     setEmailBody={setEmailBody}
                     useTemplateForAll={useTemplateForAll}
-                    setUseTemplateForAll={setUseTemplateForAll}
+                    setUseTemplateForAll={handleUseTemplateForAllChange}
                     onOpenTemplates={() => setIsTemplateModalOpen(true)}
                     onOpenAI={() => setIsAIModalOpen(true)}
                     onOpenSaveTemplate={() => setIsSaveModalOpen(true)}
