@@ -275,46 +275,14 @@ export default function Dashboard() {
 
                             {/* Chart Section & More Analysis - Grid Row */}
                             <div className="flex flex-col md:grid md:grid-cols-3 gap-4 flex-shrink-0 min-h-[150px]">
-                                {/* Regular Sell Chart - Spans 2 columns - Hidden on Mobile */}
+                                {/* Analytics Section - Spans 2 columns - Hidden on Mobile */}
                                 <div className="hidden md:flex col-span-2 bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex-col h-full min-h-[140px]">
                                     <div className="flex items-center justify-between mb-2">
-                                        <h3 className="text-sm font-semibold text-gray-800">Regular Sell</h3>
-                                        <Button variant="outline" className="text-xs bg-transparent border-emerald-500 text-emerald-500 hover:bg-emerald-50 rounded-lg px-3 h-7">
-                                            Export
-                                        </Button>
+                                        <h3 className="text-sm font-semibold text-gray-800">Analytics</h3>
                                     </div>
-                                    {/* Chart Y-axis labels and bars */}
-                                    <div className="flex gap-3 flex-1">
-                                        {isLoadingStats ? (
-                                            <div className="w-full h-full flex items-center justify-center">
-                                                <div className="h-10 w-10 border-2 border-gray-200 border-t-emerald-500 rounded-full animate-spin"></div>
-                                            </div>
-                                        ) : !chartData.some(d => d.value > 0) ? (
-                                            <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-                                                <BarChart3 className="w-8 h-8 mb-2 opacity-20" />
-                                                <p className="text-sm">No Data Available</p>
-                                                <p className="text-xs">No sales recorded this week.</p>
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <div className="flex flex-col justify-between text-xs text-gray-400">
-                                                    <span>{Math.max(...chartData.map(d => d.value), 10)}</span>
-                                                    <span>{Math.floor(Math.max(...chartData.map(d => d.value), 10) / 2)}</span>
-                                                    <span>0</span>
-                                                </div>
-                                                <div className="flex-1 flex items-end justify-between gap-1">
-                                                    {chartData.map((item) => (
-                                                        <div key={item.day} className="flex flex-col items-center gap-1 flex-1">
-                                                            <div
-                                                                className="w-full max-w-6 bg-gradient-to-t from-emerald-400 to-emerald-300 rounded-t-md transition-all hover:from-emerald-500 hover:to-emerald-400"
-                                                                style={{ height: `${(item.value / Math.max(...chartData.map(d => d.value), 1)) * 80}px`, minHeight: '4px' }}
-                                                            />
-                                                            <span className="text-xs text-gray-500">{item.day}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </>
-                                        )}
+                                    <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                                        <BarChart3 className="w-8 h-8 mb-2 opacity-20" />
+                                        <p className="text-sm">No data to show</p>
                                     </div>
                                 </div>
 
