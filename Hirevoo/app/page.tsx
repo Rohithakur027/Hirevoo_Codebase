@@ -938,7 +938,7 @@ export default function LandingPage() {
                   <span className="text-gray-500 dark:text-gray-400">/month</span>
                 </div>
                 <ul className="space-y-3 mb-8 flex-1">
-                  {['Unlimited emails per day', 'Premium AI personalization', 'Advanced analytics dashboard', 'Custom automation workflows', 'Dedicated account manager', 'API access'].map((feature) => (
+                  {['Unlimited emails per day', 'Premium AI personalization', 'Advanced analytics dashboard', 'Custom automation workflows', 'Dedicated account manager'].map((feature) => (
                     <li key={feature} className="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
                       <CheckCircle className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                       {feature}
