@@ -867,8 +867,8 @@ export default function LandingPage() {
                   <p className="text-gray-500 dark:text-gray-400 text-sm">Perfect for getting started</p>
                 </div>
                 <div className="mb-6">
-                  <span className="text-4xl font-bold text-gray-900 dark:text-white">free</span>
-                  \
+                  <span className="text-4xl font-bold text-gray-900 dark:text-white">free plan</span>
+
                 </div>
                 <ul className="space-y-3 mb-8 flex-1">
                   {['10 emails per day', 'Basic AI personalization', 'Email tracking', 'Community support'].map((feature) => (
