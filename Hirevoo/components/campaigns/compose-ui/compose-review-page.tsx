@@ -291,7 +291,7 @@ export function ComposeReviewPage() {
         <div className="h-screen bg-gray-50 gap-4 p-4 grid grid-cols-3">
             {/* Contact List Column */}
             <div className="flex flex-col overflow-hidden bg-white rounded-lg border border-gray-200 shadow-sm">
-                <div className="hidden md:block">
+                <div className="hidden md:flex flex-col flex-1 min-h-0">
                     <ContactSidebar
                         contacts={filteredContacts}
                         selectedContact={selectedContact}

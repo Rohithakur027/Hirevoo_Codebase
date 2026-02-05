@@ -33,7 +33,7 @@ export function ContactSidebar({
     }
 
     return (
-        <div className="hidden md:flex w-full border-r bg-white flex-col">
+        <div className="flex w-full border-r bg-white flex-col flex-1 min-h-0">
             <div className="p-3 border-b">
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
