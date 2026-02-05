@@ -1,15 +1,10 @@
 /**
- * BullMQ queue configuration for email campaign processing.
- * Configures the job queue, retry logic, and job lifecycle management.
+ * BullMQ configuration for the Email Queue.
+ * Handles job persistence, automated retries, and concurrency management for campaign dispatch.
  *
- * Key features:
- * - Automatic retry with exponential backoff (2s -> 4s -> 8s)
- * - Job deduplication
- * - Progress tracking
- * - Failed job retention for debugging (7 days)
- * - Completed job cleanup (24 hours, max 1000 jobs)
- *
- * @module lib/queue/email-queue
+ * Architecture Note:
+ * This queue processes essentially two types of jobs: 'send-campaign' (bulk) and 'send-reply' (transactional).
+ * We use exponential backoff for retries to handle transient SMTP/provider failures gracefully.
  */
 
 import { Queue, type JobsOptions } from 'bullmq';
@@ -76,39 +71,30 @@ export interface SendCampaignJobResult {
  * Default job options applied to all jobs in this queue.
  * Controls processing, retries, and cleanup.
  */
+/**
+ * Standard configuration applied to all email jobs.
+ * Balances reliability (retries) with resource management (cleanup).
+ */
 const defaultJobOptions: JobsOptions = {
-  // ─────────────────────────────────────────────────────────
-  // RETRY CONFIGURATION
-  // ─────────────────────────────────────────────────────────
-  // Retry 3 times for transient errors
+  // Retry Strategy:
+  // Exponential backoff (2s -> 4s -> 8s) handles transient failures like rate limits or socket timeouts.
   attempts: 3,
-
-  // Exponential backoff
-  // 2s -> 4s -> 8s
   backoff: {
     type: 'exponential',
-    delay: 2000, // Base delay: 2 seconds
+    delay: 2000,
   },
 
-  // ─────────────────────────────────────────────────────────
-  // JOB LIFECYCLE MANAGEMENT
-  // ─────────────────────────────────────────────────────────
-  // Keep completed jobs for history/debugging (24h)
+  // Cleanup Strategy:
+  // - Completed: Keep recent history (24h) for UI feedback/debugging.
+  // - Failed: Keep longer history (7d) for deep-dive investigations.
   removeOnComplete: {
-    age: 86400, // Keep for 24 hours (in seconds)
-    count: 1000, // Keep max 1000 completed jobs
+    age: 24 * 60 * 60, // 24 hours
+    count: 1000,
   },
-
-  // Keep failed jobs for debugging (7 days)
   removeOnFail: {
-    age: 604800, // Keep for 7 days (in seconds)
-    count: 5000, // Keep max 5000 failed jobs
+    age: 7 * 24 * 60 * 60, // 7 days
+    count: 5000,
   },
-
-  // ─────────────────────────────────────────────────────────
-  // TIMEOUT CONFIGURATION
-  // ─────────────────────────────────────────────────────────
-  // timeout: 1800000, // 30 minutes
 };
 
 /**
@@ -117,7 +103,7 @@ const defaultJobOptions: JobsOptions = {
  * Queue name: 'emails'
  */
 
-// Lazy-loaded queue instance
+// Singleton instance to prevent multiple Redis connections during hot reloads.
 let emailQueueInstance: Queue<SendCampaignJobData, SendCampaignJobResult> | null = null;
 
 export function getEmailQueue(): Queue<SendCampaignJobData, SendCampaignJobResult> {
@@ -125,24 +111,16 @@ export function getEmailQueue(): Queue<SendCampaignJobData, SendCampaignJobResul
     emailQueueInstance = new Queue<SendCampaignJobData, SendCampaignJobResult>(
       'emails',
       {
-        // Use our configured Redis connection
         connection: getRedis() as any,
-
-        // Apply default job options to all jobs
         defaultJobOptions,
 
-        // ─────────────────────────────────────────────────────────
-        // QUEUE-LEVEL SETTINGS
-        // ─────────────────────────────────────────────────────────
-        // Prefix for Redis keys. Useful when sharing Redis with other apps.
-        // Keys will be: bull:hirevoo:emails:* (jobs, events, etc.)
+        // Namespace keys to avoid collisions in shared Redis environments.
         prefix: 'bull:hirevoo',
 
-        // Stream configuration for job events
+        // Keep a modest event stream history for monitoring tools.
         streams: {
-          // How long to keep job events in the stream (for monitoring)
           events: {
-            maxLen: 10000, // Keep last 10,000 events
+            maxLen: 10000,
           },
         },
       }
@@ -200,39 +178,26 @@ export async function queueCampaignSend(
     `Campaign: ${campaignId}, User: ${userId}`
   );
 
-  // ─────────────────────────────────────────────────────────
-  // STEP 1: CHECK FOR DUPLICATE JOBS (IDEMPOTENCY)
-  // ─────────────────────────────────────────────────────────
-  // Prevent queuing duplicates.
-  // Use campaignId as the job ID for uniqueness.
-
+  // Idempotency: Use campaignId as the deterministic Job ID.
+  // This explicitly prevents double-queuing the same campaign.
   const jobId = `campaign-${campaignId}`;
-
-  // Check if this campaign already has an active job
   const existingJob = await getEmailQueue().getJob(jobId);
 
   if (existingJob) {
     const state = await existingJob.getState();
 
-    // If job is still active (waiting, delayed, or being processed)
+    // Reject if the job is actively being processed or waiting.
     if (['waiting', 'delayed', 'active'].includes(state)) {
       console.warn(
-        `${logPrefix} Campaign ${campaignId} already has active job ` +
-        `(ID: ${jobId}, State: ${state}). Rejecting duplicate.`
+        `${logPrefix} Duplicate job rejected. Job ${jobId} is currently ${state}.`
       );
-
       throw new Error(
-        `Campaign is already being processed. ` +
-        `Current status: ${state}. Please wait for it to complete.`
+        `Campaign is currently ${state}. Please wait for it to complete.`
       );
     }
 
-    // If job completed or failed, we allow re-queuing
-    // (e.g., user wants to retry a failed campaign)
-    console.log(
-      `${logPrefix} Previous job for campaign ${campaignId} found ` +
-      `in state: ${state}. Allowing re-queue.`
-    );
+    // Allow re-run if previous job is finished (completed/failed).
+    console.log(`${logPrefix} Stale job found (${state}). allowing re-queue.`);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -249,29 +214,16 @@ export async function queueCampaignSend(
   // STEP 3: ADD JOB TO QUEUE
   // ─────────────────────────────────────────────────────────
   const job = await getEmailQueue().add(
-    'send-campaign', // Job name (for filtering/monitoring)
+    'send-campaign',
     jobData,
     {
-      // Use campaignId as job ID for idempotency
-      jobId,
-
-      // Priority: lower number = higher priority
-      // Default: 5 (medium priority)
-      // Premium users could get priority 1-2
-      priority: options?.priority ?? 5,
-
-      // Optional delay before processing
+      jobId, // Enforce idempotency
+      priority: options?.priority ?? 5, // 1=High, 10=Low
       delay: options?.delay ?? 0,
-
-      // Job-specific timeout override (30 minutes)
-      // This is the max time the job can run
     }
   );
 
-  // ─────────────────────────────────────────────────────────
-  // STEP 4: GET QUEUE POSITION
-  // ─────────────────────────────────────────────────────────
-  // This gives the user an idea of when their job will be processed
+  // Return approximate position so UI can show "You are #X in line"
   const waitingCount = await getEmailQueue().getWaitingCount();
 
   console.log(
@@ -299,8 +251,7 @@ export async function queueReplySend(
 ): Promise<{ jobId: string; queuePosition: number }> {
   const timestamp = new Date().toISOString();
 
-  // Create a unique job ID for this specific reply attempt
-  // to avoid duplicates if user clicks multiple times quickly
+  // Unique ID per attempt ensures we don't accidentally dedupe legitimate rapid-fire replies
   const jobId = `reply-${campaignContactId}-${Date.now()}`;
 
   const jobData: SendReplyJobData = {
@@ -315,7 +266,7 @@ export async function queueReplySend(
     jobData as any, // Cast to any because the queue relies on the main job type generics
     {
       jobId,
-      priority: 1, // High priority for replies
+      priority: 1, // High priority: Replies should feel "instant" compared to bulk campaigns
       removeOnComplete: true,
       removeOnFail: {
         age: 24 * 3600 // Keep failed replies for 24h
@@ -392,12 +343,9 @@ export async function cancelCampaignJob(campaignId: string): Promise<boolean> {
 
   const state = await job.getState();
 
-  // Can only cancel jobs that haven't started
+  // Safety Check: We do not interrupt active jobs to avoid inconsistent state (e.g., half-sent campaigns).
   if (state === 'active') {
-    console.warn(
-      `[Queue] Cannot cancel job ${jobId} - already processing. ` +
-      `State: ${state}`
-    );
+    console.warn(`[Queue] Cannot cancel job ${jobId} - processed has already begun. State: ${state}`);
     return false;
   }
 

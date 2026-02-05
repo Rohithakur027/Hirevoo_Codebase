@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { X } from "lucide-react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -11,11 +11,21 @@ interface LinkModalProps {
     isOpen: boolean
     onClose: () => void
     onInsert: (url: string, text: string) => void
+    initialUrl?: string
+    initialText?: string
 }
 
-export function LinkModal({ isOpen, onClose, onInsert }: LinkModalProps) {
-    const [url, setUrl] = useState("")
-    const [displayText, setDisplayText] = useState("")
+export function LinkModal({ isOpen, onClose, onInsert, initialUrl = "", initialText = "" }: LinkModalProps) {
+    const [url, setUrl] = useState(initialUrl)
+    const [displayText, setDisplayText] = useState(initialText)
+
+    // Sync state when props change (e.g., when modal opens with new values)
+    useEffect(() => {
+        if (isOpen) {
+            setUrl(initialUrl)
+            setDisplayText(initialText)
+        }
+    }, [isOpen, initialUrl, initialText])
 
     const handleInsert = () => {
         if (url.trim()) {

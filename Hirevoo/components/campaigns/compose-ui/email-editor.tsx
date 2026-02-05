@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { AttachmentModal, type AttachedFile } from "./attachment-modal"
+import { LinkModal } from "./link-modal"
 import type { Contact } from "./compose-review-page"
 
 interface EmailEditorProps {
@@ -83,6 +84,9 @@ export function EmailEditor({
     const [bccValue, setBccValue] = useState("")
     const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false)
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
+    const [isLinkModalOpen, setIsLinkModalOpen] = useState(false)
+    const [linkInitialUrl, setLinkInitialUrl] = useState("")
+    const [linkInitialText, setLinkInitialText] = useState("")
 
     const editor = useEditor({
         immediatelyRender: false,
@@ -123,14 +127,48 @@ export function EmailEditor({
     const toggleBold = () => editor?.chain().focus().toggleBold().run()
     const toggleItalic = () => editor?.chain().focus().toggleItalic().run()
     const toggleLink = () => {
-        const previousUrl = editor?.getAttributes('link').href
-        const url = window.prompt('URL', previousUrl)
-        if (url === null) return
-        if (url === '') {
-            editor?.chain().focus().extendMarkRange('link').unsetLink().run()
-            return
+        if (!editor) return
+
+        // Get the currently selected text
+        const { from, to } = editor.state.selection
+        const selectedText = editor.state.doc.textBetween(from, to, '')
+
+        // Get existing link URL if cursor is on a link
+        const previousUrl = editor.getAttributes('link').href || ""
+
+        // Set initial values for the modal
+        setLinkInitialUrl(previousUrl)
+        setLinkInitialText(selectedText)
+        setIsLinkModalOpen(true)
+    }
+
+    const handleInsertLink = (url: string, text: string) => {
+        if (!editor) return
+
+        const { from, to } = editor.state.selection
+        const hasSelection = from !== to
+
+        if (hasSelection) {
+            // If there's a selection, replace it with a link
+            editor.chain()
+                .focus()
+                .deleteSelection()
+                .insertContent(`<a href="${url}">${text}</a>`)
+                .run()
+        } else if (editor.isActive('link')) {
+            // If cursor is inside an existing link, update the link URL
+            editor.chain()
+                .focus()
+                .extendMarkRange('link')
+                .setLink({ href: url })
+                .run()
+        } else {
+            // If no selection and not in a link, insert new link text
+            editor.chain()
+                .focus()
+                .insertContent(`<a href="${url}">${text}</a>`)
+                .run()
         }
-        editor?.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
     }
     const toggleBulletList = () => editor?.chain().focus().toggleBulletList().run()
     const toggleOrderedList = () => editor?.chain().focus().toggleOrderedList().run()
@@ -372,6 +410,14 @@ export function EmailEditor({
                     isOpen={isAttachmentModalOpen}
                     onClose={() => setIsAttachmentModalOpen(false)}
                     onAttach={handleAttachFiles}
+                />
+
+                <LinkModal
+                    isOpen={isLinkModalOpen}
+                    onClose={() => setIsLinkModalOpen(false)}
+                    onInsert={handleInsertLink}
+                    initialUrl={linkInitialUrl}
+                    initialText={linkInitialText}
                 />
             </div>
         </TooltipProvider>
